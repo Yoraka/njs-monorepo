@@ -1,5 +1,5 @@
 {
-  "name": "njs-monorepo",
+  "name": "proxy-platform",
   "private": true,
   "scripts": {
     "build": "turbo build",
@@ -8,11 +8,12 @@
     "format": "prettier --write \"**/*.{ts,tsx,md}\""
   },
   "devDependencies": {
-    "prettier": "^3.2.5",
-    "turbo": "^2.3.3",
-    "typescript": "5.5.4"
+    "@repo/eslint-config": "workspace:*",
+    "@repo/typescript-config": "workspace:*",
+    "prettier": "^3.1.0",
+    "turbo": "latest"
   },
-  "packageManager": "pnpm@9.0.0",
+  "packageManager": "pnpm@8.9.0",
   "engines": {
     "node": ">=18"
   }

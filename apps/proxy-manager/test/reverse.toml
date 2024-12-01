@@ -1,0 +1,179 @@
+# 正向代理相关，http/https/socks5等代理配置
+control = "127.0.0.1:8837"
+# [proxy]
+# bind_addr = "0.0.0.0:8090"
+# username = "wmproxy"
+# password = "wmproxy"
+# flag = 7
+
+# 反向代理相关，七层协议为http及https
+[http]
+# aa = "b"
+
+max_read_buf = 1024000
+access_log = "access main trace"
+error_log = "error trace"
+
+[http.log_format]
+main = "{d(%Y-%m-%d %H:%M:%S)} {client_ip} {l} {url} path:{path} query:{query} host:{host} status: {status} {up_status} referer: {referer} user_agent: {user_agent} cookie: {cookie}"
+
+[http.log_names]
+access = "logs/access.log trace"
+error = "logs/error.log"
+default = "logs/default.log"
+
+[http.limit_req_zone]
+limit = "{client_ip} limit=10m rate=1000r/s"
+
+# 反向代理中的负载均衡地址列表，按名字匹配
+[[http.upstream]]
+name = "server"
+server = [
+  { addr = "127.0.0.1:8001", fail_timeout = 30 },
+  { addr = "127.0.0.1:8002", fail_timeout = 30 },
+  { addr = "127.0.0.1:8003", fail_timeout = 30 },
+  # {addr="127.0.0.1:8081"}
+]
+
+[[http.upstream]]
+name = "nothing"
+server = [
+  { addr = "127.0.0.1:8003", fail_timeout = 30 },
+]
+
+[[http.upstream]]
+name = "ws"
+server = [
+  { addr = "127.0.0.1:8081", fail_timeout = 30 },
+  # {addr="127.0.0.1:8081"}
+]
+
+# 反向代理中的具体服务，可配置多个多组
+[[http.server]]
+bind_addr = "0.0.0.0:80"
+up_name = "soft.wm-proxy.com"
+proxy_connect_timeout = "10s"
+proxy_read_timeout = "10s"
+proxy_write_timeout = "10s"
+root = ""
+# 若有匹配密钥则表示为SSL连接，反之则为http连接
+#cert="key/soft.wm-proxy.com.pem"
+#key="key/soft.wm-proxy.com.key"
+
+# 请求头返回头相应的处理，如有proxy则为请求头处理，+表示添加，-表示删除，其它表示设置
+# headers = [
+#   "proxy x-forward-for {client_ip}",
+#   "+ last-modified 'from proxy'",
+# ]
+limit_req = "zone=limit brust=1"
+
+# 按请求路径进行rule匹配，可匹配method，看具体的处理的内容如文件服务或者负载均衡
+[[http.server.location]]
+rate_limit = "5m/s"
+rule = "/root"
+file_server = { browse = true }
+proxy_pass = ""
+try_paths = "{path}/ '/ro(\\w+)/(.*) {path} /ro$1/Cargo.toml' /root/README.md"
+
+# [[http.server.location]]
+# rule = "/try"
+# allow_ip = "127.0.0.1"
+
+[[http.server.location]]
+rule = "@ws"
+is_ws = true
+proxy_url = "http://ws"
+headers = ["+ aaa bbb"]
+
+
+[[http.server.location]]
+rule = "/static"
+static_response = "I'm Ok {client_ip}"
+
+[[http.server.location]]
+rule = "/"
+proxy_url = "http://server"
+
+# [[http.server.location]]
+# rule = "/"
+# proxy_url = "http://server"
+# headers = ["+ aaa bbb"]
+
+[[http.server]]
+bind_addr = "0.0.0.0:80"
+up_name = "test.wm-proxy.com"
+proxy_connect_timeout = "10s"
+proxy_read_timeout = "10s"
+proxy_write_timeout = "10s"
+root = ""
+# limit_req = "zone=limit brust=1"
+
+[[http.server.location]]
+rule = "/"
+proxy_url = "http://nothing"
+
+# IP的四层协议处理
+[stream]
+
+# 四层协议的负载均衡
+[[stream.upstream]]
+name = "server"
+server = [
+  { addr = "127.0.0.1:8080", fail_timeout = 30 },
+  #  {addr="127.0.0.1:8081"}
+]
+
+[[stream.upstream]]
+name = "ws"
+server = [
+  { addr = "127.0.0.1:8081", fail_timeout = 30 },
+  #  {addr="127.0.0.1:8081"}
+]
+
+# 负载均衡，bind为udp则表示udp连接
+[[stream.upstream]]
+name = "udp"
+bind = "udp"
+server = [{ addr = "127.0.0.1:8089" }]
+
+# 四层服务器，up_name映射upstream的name
+[[stream.server]]
+bind_addr = "0.0.0.0:83"
+up_name = "server"
+
+[[stream.server]]
+bind_addr = "0.0.0.0:85"
+proxy_url = "ws://127.0.0.1:8081/"
+bind_mode = "tcp2ws"
+
+# 四层服务器，udp转发
+[[stream.server]]
+bind_addr = "0.0.0.0:84"
+bind_mode = "udp"
+up_name = "udp"
+timeout = "500s"
+
+[[stream.server]]
+bind_addr = "0.0.0.0:86"  
+up_name = "ws1"
+proxy_url = "tcp://127.0.0.1:8082"
+bind_mode = "ws2tcp"
+
+# [[http.server]]
+# bind_addr = "0.0.0.0:81"
+# up_name = "local.tool.fit"
+# root="E:/1"
+# cert="key/local.tool.fit.pem"
+# key="key/local.tool.fit.key"
+
+
+# [[http.server.location]]
+# rule = "/root"
+# file_server = { browse = true }
+
+# [[http.server.location]]
+# rule = "/"
+# reverse_proxy = "https://www.baidu.com"
+# headers = [
+#   ["+", "aaa", "bbb"]
+# ]

@@ -1,0 +1,42 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./database.sqlite"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  userName  String
+  password  String
+  role      String   @default("user")
+  email     String   @unique
+  image     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ServerMetrics {
+  id              String   @id @default(cuid())
+  timestamp       DateTime
+  serverName      String
+  requestCount    Int      @default(0)
+  inboundTraffic  Float    @default(0)
+  outboundTraffic Float    @default(0)
+  connections     Int      @default(0)
+  
+  @@index([timestamp])
+  @@index([serverName, timestamp])
+}
+
+model SystemMetrics {
+  id           String   @id @default(cuid())
+  timestamp    DateTime
+  cpuUsage     Float
+  memoryUsage  Float
+  diskIO       Float
+  
+  @@index([timestamp])
+}

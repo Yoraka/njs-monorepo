@@ -1,0 +1,4 @@
+﻿{
+  "extends": "@repo/typescript-config/proxy-service.json",
+  "include": ["src"]
+}

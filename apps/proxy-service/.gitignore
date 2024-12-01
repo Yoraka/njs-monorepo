@@ -1,0 +1,11 @@
+# Start Generation Here
+# 这个文件用于忽略不需要提交到版本控制的文件和目录
+node_modules/
+dist/
+logs/
+ssl/
+instructionMarkdown/
+*.env
+*.log
+*.tmp
+# End Generation Here
