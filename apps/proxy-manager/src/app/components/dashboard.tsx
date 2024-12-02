@@ -19,6 +19,9 @@ import Image from "next/image"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { format } from "date-fns"
 import type { RateMetrics } from "@/services/metrics-manager"
+import { getMetricsManager } from '@/services/metrics-manager'
+import { MetricsData } from '@/types/metrics'
+import { getWebSocketClient } from '@/services/ws-client'
 
 type TrendDataPoint = {
   timestamp: Date
@@ -37,9 +40,9 @@ type ServerMetrics = {
 }
 
 type SystemMetrics = {
-  cpu: number
-  memory: number
-  disk: number
+  cpuUsage: number;
+  memoryPercentage: number;
+  diskUsage: number;
 }
 
 type ProxyServer = {
@@ -226,9 +229,9 @@ export default function Dashboard() {
   const [timeRange, setTimeRange] = useState('1h')
   const [historyData, setHistoryData] = useState<ServerMetrics[]>([])
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics>({
-    cpu: 0,
-    memory: 0,
-    disk: 0
+    cpuUsage: 0,
+    memoryPercentage: 0,
+    diskUsage: 0
   })
   const [trendData, setTrendData] = useState<TrendDataPoint[]>([])
 
@@ -325,7 +328,7 @@ export default function Dashboard() {
     }
 
     fetchSystemMetrics()
-    const interval = setInterval(fetchSystemMetrics, 10000)
+    const interval = setInterval(fetchSystemMetrics, 5000) // 每5秒刷新一次
     return () => clearInterval(interval)
   }, [])
 
@@ -639,30 +642,30 @@ export default function Dashboard() {
                 <div className="w-full bg-secondary rounded-full h-2.5">
                   <div
                     className="bg-primary h-2.5 rounded-full"
-                    style={{ width: `${systemMetrics.cpu}%` }}
+                    style={{ width: `${systemMetrics.cpuUsage}%` }}
                   />
                 </div>
-                <div className="w-16 text-right">{systemMetrics.cpu}%</div>
+                <div className="w-16 text-right">{systemMetrics.cpuUsage}%</div>
               </div>
               <div className="flex items-center">
                 <div className="w-40">Memory Usage:</div>
                 <div className="w-full bg-secondary rounded-full h-2.5">
                   <div
                     className="bg-primary h-2.5 rounded-full"
-                    style={{ width: `${systemMetrics.memory}%` }}
+                    style={{ width: `${systemMetrics.memoryPercentage}%` }}
                   />
                 </div>
-                <div className="w-16 text-right">{systemMetrics.memory}%</div>
+                <div className="w-16 text-right">{systemMetrics.memoryPercentage}%</div>
               </div>
               <div className="flex items-center">
                 <div className="w-40">Disk Usage:</div>
                 <div className="w-full bg-secondary rounded-full h-2.5">
                   <div
                     className="bg-primary h-2.5 rounded-full"
-                    style={{ width: `${systemMetrics.disk}%` }}
+                    style={{ width: `${systemMetrics.diskUsage}%` }}
                   />
                 </div>
-                <div className="w-16 text-right">{systemMetrics.disk}%</div>
+                <div className="w-16 text-right">{systemMetrics.diskUsage}%</div>
               </div>
             </div>
           )}

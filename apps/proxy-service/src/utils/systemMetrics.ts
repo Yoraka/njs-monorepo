@@ -1,107 +1,85 @@
-import { SystemMetrics } from '../types';
 import * as os from 'os';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import { SystemMetrics } from '../types';
 
-/**
- * 收集系统硬件指标
- * @returns SystemMetrics 包含CPU使用率、内存使用和磁盘IO的系统指标
- */
-export function collectSystemMetrics(): SystemMetrics {
-  // 获取CPU使用率
-  const cpuUsage = getCPUUsage();
-  
-  // 获取内存使用情况
-  const memory = getMemoryUsage();
-  
-  // 获取磁盘IO
-  const diskIO = getDiskIO();
-  
-  return {
-    cpuUsage,
-    memoryUsage: memory.used,
-    memoryPercentage: memory.percentage,
-    diskIO
-  };
-}
+const execAsync = promisify(exec);
 
-// 存储上一次的 CPU 时间
-let lastCPUInfo: {
-  idle: number;
-  total: number;
-} | null = null;
+let lastCPUInfo = os.cpus();
+let lastMeasureTime = Date.now();
 
-/**
- * 计算CPU使用率
- * @returns number CPU使用率百分比(0-100)
- */
-function getCPUUsage(): number {
-  const cpus = os.cpus();
-  let totalIdle = 0;
-  let totalTick = 0;
-
-  cpus.forEach(cpu => {
-    for (const type in cpu.times) {
-      totalTick += cpu.times[type as keyof typeof cpu.times];
-    }
-    totalIdle += cpu.times.idle;
-  });
-
-  const idle = totalIdle / cpus.length;
-  const total = totalTick / cpus.length;
-
-  if (lastCPUInfo === null) {
-    // 第一次调用，保存当前值并返回0
-    lastCPUInfo = { idle, total };
-    return 0;
-  }
-
-  // 计算时间差
-  const idleDiff = idle - lastCPUInfo.idle;
-  const totalDiff = total - lastCPUInfo.total;
-
-  // 更新上次的值
-  lastCPUInfo = { idle, total };
-
-  // 计算 CPU 使用率
-  const usage = totalDiff === 0 ? 0 : 100 * (1 - idleDiff / totalDiff);
-
-  return Math.round(usage * 100) / 100;
-}
-
-/**
- * 获取内存使用情况
- * @returns { used: number, percentage: number } 返回已使用内存(字节)和使用百分比
- */
-function getMemoryUsage(): { used: number, percentage: number } {
-  const totalMem = os.totalmem();
-  const freeMem = os.freemem();
-  const used = totalMem - freeMem;
-  const percentage = Math.round((used / totalMem) * 10000) / 100; // 保留两位小数的百分比
-  
-  return {
-    used,
-    percentage
-  };
-}
-
-/**
- * 获取磁盘IO速率
- * 注意：这是一个简化的实现，实际生产环境中应该使用更复杂的逻辑来计算真实的磁盘IO
- * @returns number 磁盘IO速率(字节/秒)
- */
-let lastIOBytes = 0;
-let lastIOTime = Date.now();
-
-function getDiskIO(): number {
-  // 这里使用模拟数据，实际应该从 /proc/diskstats (Linux) 或其他系统API获取
-  const currentIOBytes = Math.random() * 1000000; // 模拟的IO字节数
+export async function collectSystemMetrics(): Promise<SystemMetrics> {
+  // 改进的 CPU 使用率计算
+  const currentCPUInfo = os.cpus();
   const currentTime = Date.now();
   
-  const ioRate = (currentIOBytes - lastIOBytes) / ((currentTime - lastIOTime) / 1000);
+  let totalUsage = 0;
+  const cpuCount = currentCPUInfo.length;
   
-  lastIOBytes = currentIOBytes;
-  lastIOTime = currentTime;
+  for (let i = 0; i < cpuCount; i++) {
+    const lastCPU = lastCPUInfo[i];
+    const currentCPU = currentCPUInfo[i];
+    
+    const lastTotal = Object.values(lastCPU.times).reduce((a, b) => a + b, 0);
+    const currentTotal = Object.values(currentCPU.times).reduce((a, b) => a + b, 0);
+    
+    const lastIdle = lastCPU.times.idle;
+    const currentIdle = currentCPU.times.idle;
+    
+    const totalDiff = currentTotal - lastTotal;
+    const idleDiff = currentIdle - lastIdle;
+    
+    const usage = 100 * (1 - idleDiff / totalDiff);
+    totalUsage += usage;
+  }
   
-  return Math.round(ioRate);
+  // 更新上次的测量值
+  lastCPUInfo = currentCPUInfo;
+  lastMeasureTime = currentTime;
+  
+  const cpuUsage = totalUsage / cpuCount;
+  
+  // 内存使用情况
+  const totalMemory = os.totalmem();
+  const freeMemory = os.freemem();
+  const usedMemory = totalMemory - freeMemory;
+  const memoryPercentage = (usedMemory / totalMemory) * 100;
+  
+  // 磁盘使用率
+  let diskUsage = 0;
+  try {
+    // 在 Linux/Unix 系统上使用 df 命令
+    if (process.platform !== 'win32') {
+      const { stdout } = await execAsync("df / | tail -1 | awk '{print $5}'");
+      diskUsage = parseInt(stdout.trim().replace('%', ''));
+    } else {
+      // Windows 系统上使用 wmic 命令
+      const { stdout } = await execAsync('wmic logicaldisk get size,freespace,caption');
+      const lines = stdout.trim().split('\n').slice(1);
+      let totalSize = 0;
+      let totalFree = 0;
+      
+      lines.forEach(line => {
+        const [caption, freeSpace, size] = line.trim().split(/\s+/);
+        if (size && freeSpace) {
+          totalSize += parseInt(size);
+          totalFree += parseInt(freeSpace);
+        }
+      });
+      
+      diskUsage = ((totalSize - totalFree) / totalSize) * 100;
+    }
+  } catch (error) {
+    console.error('Error collecting disk metrics:', error);
+    diskUsage = 0;
+  }
+
+  return {
+    cpuUsage: Math.round(cpuUsage * 100) / 100,
+    memoryUsage: Math.round(usedMemory / 1024 / 1024), // MB
+    memoryPercentage: Math.round(memoryPercentage * 100) / 100,
+    diskUsage: Math.round(diskUsage * 100) / 100
+  };
 }
 
 /**
@@ -112,6 +90,6 @@ export function mockSystemMetrics(metrics: Partial<SystemMetrics>): SystemMetric
     cpuUsage: metrics.cpuUsage ?? 0,
     memoryUsage: metrics.memoryUsage ?? 0,
     memoryPercentage: metrics.memoryPercentage ?? 0,
-    diskIO: metrics.diskIO ?? 0
+    diskUsage: metrics.diskUsage ?? 0
   };
 }

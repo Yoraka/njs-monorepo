@@ -4,16 +4,16 @@ import { getMetricsManager } from '@/services/metrics-manager'
 export async function GET() {
   try {
     const metricsManager = getMetricsManager()
-    const systemMetrics = metricsManager.getLatestSystemMetrics()
+    const latestMetrics = metricsManager.getLatestMetrics()
 
-    if (!systemMetrics) {
+    if (!latestMetrics?.systemMetrics) {
       return NextResponse.json(
         { error: 'No system metrics available' },
         { status: 404 }
       )
     }
 
-    return NextResponse.json(systemMetrics)
+    return NextResponse.json(latestMetrics.systemMetrics)
   } catch (error) {
     console.error('Error fetching system metrics:', error)
     return NextResponse.json(
