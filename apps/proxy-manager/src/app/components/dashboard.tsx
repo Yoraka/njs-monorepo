@@ -239,6 +239,8 @@ export default function Dashboard() {
     diskUsage: 0
   })
   const [trendData, setTrendData] = useState<TrendDataPoint[]>([])
+  const [systemMetricsCache, setSystemMetricsCache] = useState<SystemMetrics | null>(null);
+  const [systemMetricsError, setSystemMetricsError] = useState(0);
 
   // 获取概览数据
   const fetchOverviewData = async () => {
@@ -324,18 +326,44 @@ export default function Dashboard() {
   useEffect(() => {
     const fetchSystemMetrics = async () => {
       try {
-        const response = await fetch('/api/proxy-stats/system')
-        const data = await response.json()
-        setSystemMetrics(data)
+        const response = await fetch('/api/proxy-stats/system');
+        if (!response.ok) throw new Error('Failed to fetch system metrics');
+        
+        const data = await response.json();
+        
+        // 验证数据有效性
+        if (typeof data.cpuUsage === 'number' && !isNaN(data.cpuUsage)) {
+          setSystemMetrics(data);
+          setSystemMetricsCache(data); // 缓存有效数据
+          setSystemMetricsError(0);
+        } else {
+          // 如果数据无效，使用缓存数据
+          console.warn('Invalid system metrics data:', data);
+          if (systemMetricsCache) {
+            setSystemMetrics(systemMetricsCache);
+          }
+          setSystemMetricsError(prev => prev + 1);
+        }
       } catch (error) {
-        console.error('Failed to fetch system metrics:', error)
+        console.error('Failed to fetch system metrics:', error);
+        // 发生错误时使用缓存数据
+        if (systemMetricsCache) {
+          setSystemMetrics(systemMetricsCache);
+        }
+        setSystemMetricsError(prev => prev + 1);
       }
-    }
+    };
 
-    fetchSystemMetrics()
-    const interval = setInterval(fetchSystemMetrics, 5000) // 每5秒刷新一次
-    return () => clearInterval(interval)
-  }, [])
+    fetchSystemMetrics();
+    
+    // 根据错误次数动态调整更新间隔
+    const interval = setInterval(
+      fetchSystemMetrics, 
+      systemMetricsError > 3 ? 10000 : 5000
+    );
+    
+    return () => clearInterval(interval);
+  }, [systemMetricsError]); // 添加 systemMetricsError 作为依赖
 
   // 获取趋势数据
   useEffect(() => {
@@ -644,11 +672,18 @@ export default function Dashboard() {
                 <div className="w-40">{t('metrics.cpuUsage')}:</div>
                 <div className="w-full bg-secondary rounded-full h-2.5">
                   <div
-                    className="bg-primary h-2.5 rounded-full"
-                    style={{ width: `${systemMetrics.cpuUsage}%` }}
+                    className="bg-primary h-2.5 rounded-full transition-all duration-300"
+                    style={{ 
+                      width: `${Math.max(0, Math.min(100, systemMetrics.cpuUsage))}%` 
+                    }}
                   />
                 </div>
-                <div className="w-16 text-right">{systemMetrics.cpuUsage}%</div>
+                <div className="w-16 text-right">
+                  {systemMetrics.cpuUsage > 0 ? 
+                    `${systemMetrics.cpuUsage.toFixed(1)}%` : 
+                    systemMetricsCache?.cpuUsage.toFixed(1) + '%'
+                  }
+                </div>
               </div>
               <div className="flex items-center">
                 <div className="w-40">{t('metrics.memoryUsage')}:</div>

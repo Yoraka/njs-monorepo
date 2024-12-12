@@ -5,81 +5,125 @@ import { SystemMetrics } from '../types';
 
 const execAsync = promisify(exec);
 
-let lastCPUInfo = os.cpus();
-let lastMeasureTime = Date.now();
+// 使用 Map 存储上次的测量值，避免全局变量可能的竞争条件
+const metricsCache = new Map<string, any>();
 
 export async function collectSystemMetrics(): Promise<SystemMetrics> {
-  // 改进的 CPU 使用率计算
   const currentCPUInfo = os.cpus();
   const currentTime = Date.now();
   
-  let totalUsage = 0;
-  const cpuCount = currentCPUInfo.length;
+  let cpuUsage = 0;
   
-  for (let i = 0; i < cpuCount; i++) {
-    const lastCPU = lastCPUInfo[i];
-    const currentCPU = currentCPUInfo[i];
+  // 获取上次的测量值
+  const lastCPUInfo = metricsCache.get('lastCPUInfo');
+  const lastMeasureTime = metricsCache.get('lastMeasureTime');
+  
+  if (lastCPUInfo) {
+    let totalUsage = 0;
+    const cpuCount = currentCPUInfo.length;
     
-    const lastTotal = Object.values(lastCPU.times).reduce((a, b) => a + b, 0);
-    const currentTotal = Object.values(currentCPU.times).reduce((a, b) => a + b, 0);
+    for (let i = 0; i < cpuCount; i++) {
+      const lastCPU = lastCPUInfo[i];
+      const currentCPU = currentCPUInfo[i];
+      
+      // 计算总的 CPU 时间差
+      const lastTotal = lastCPU.times.user + lastCPU.times.nice + 
+                       lastCPU.times.sys + lastCPU.times.idle + 
+                       lastCPU.times.irq;
+      const currentTotal = currentCPU.times.user + currentCPU.times.nice + 
+                          currentCPU.times.sys + currentCPU.times.idle + 
+                          currentCPU.times.irq;
+      
+      // 计算空闲时间差
+      const idleDiff = currentCPU.times.idle - lastCPU.times.idle;
+      const totalDiff = currentTotal - lastTotal;
+      
+      // 计算使用率
+      if (totalDiff !== 0) {
+        const usage = 100 * (1 - idleDiff / totalDiff);
+        totalUsage += usage;
+      }
+    }
     
-    const lastIdle = lastCPU.times.idle;
-    const currentIdle = currentCPU.times.idle;
+    cpuUsage = totalUsage / cpuCount;
+  } else {
+    // 第一次收集时，计算当前 CPU 使用率
+    const cpuCount = currentCPUInfo.length;
+    let totalUsage = 0;
     
-    const totalDiff = currentTotal - lastTotal;
-    const idleDiff = currentIdle - lastIdle;
+    currentCPUInfo.forEach(cpu => {
+      const total = Object.values(cpu.times).reduce((a, b) => a + b, 0);
+      const idle = cpu.times.idle;
+      const usage = 100 * (1 - idle / total);
+      totalUsage += usage;
+    });
     
-    const usage = 100 * (1 - idleDiff / totalDiff);
-    totalUsage += usage;
+    cpuUsage = totalUsage / cpuCount;
   }
   
-  // 更新上次的测量值
-  lastCPUInfo = currentCPUInfo;
-  lastMeasureTime = currentTime;
+  // 更新缓存
+  metricsCache.set('lastCPUInfo', currentCPUInfo);
+  metricsCache.set('lastMeasureTime', currentTime);
   
-  const cpuUsage = totalUsage / cpuCount;
-  
-  // 内存使用情况
-  const totalMemory = os.totalmem();
-  const freeMemory = os.freemem();
+  // 内存使用情况 (以 MB 为单位)
+  const totalMemory = os.totalmem() / (1024 * 1024);
+  const freeMemory = os.freemem() / (1024 * 1024);
   const usedMemory = totalMemory - freeMemory;
   const memoryPercentage = (usedMemory / totalMemory) * 100;
   
   // 磁盘使用率
   let diskUsage = 0;
   try {
-    // 在 Linux/Unix 系统上使用 df 命令
     if (process.platform !== 'win32') {
+      // Linux/Unix 系统
       const { stdout } = await execAsync("df / | tail -1 | awk '{print $5}'");
       diskUsage = parseInt(stdout.trim().replace('%', ''));
     } else {
-      // Windows 系统上使用 wmic 命令
+      // Windows 系统
       const { stdout } = await execAsync('wmic logicaldisk get size,freespace,caption');
       const lines = stdout.trim().split('\n').slice(1);
       let totalSize = 0;
       let totalFree = 0;
       
-      lines.forEach(line => {
-        const [caption, freeSpace, size] = line.trim().split(/\s+/);
-        if (size && freeSpace) {
-          totalSize += parseInt(size);
-          totalFree += parseInt(freeSpace);
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 3) {
+          const freeSpace = parseInt(parts[1]);
+          const size = parseInt(parts[2]);
+          if (!isNaN(size) && !isNaN(freeSpace)) {
+            totalSize += size;
+            totalFree += freeSpace;
+          }
         }
-      });
+      }
       
-      diskUsage = ((totalSize - totalFree) / totalSize) * 100;
+      if (totalSize > 0) {
+        diskUsage = ((totalSize - totalFree) / totalSize) * 100;
+      }
     }
   } catch (error) {
     console.error('Error collecting disk metrics:', error);
-    diskUsage = 0;
   }
 
-  return {
+  // 添加时间戳和更多日志
+  const metrics = {
     cpuUsage: Math.round(cpuUsage * 100) / 100,
-    memoryUsage: Math.round(usedMemory / 1024 / 1024), // MB
+    memoryUsage: Math.round(usedMemory), // MB
     memoryPercentage: Math.round(memoryPercentage * 100) / 100,
-    diskUsage: Math.round(diskUsage * 100) / 100
+    diskUsage: Math.round(diskUsage * 100) / 100,
+    timestamp: new Date().toISOString()
   };
+
+  // 添加调试日志
+  // console.log('Debug - 系统指标收集:', {
+  //   ...metrics,
+  //   totalMemory: Math.round(totalMemory),
+  //   freeMemory: Math.round(freeMemory),
+  //   platform: process.platform,
+  //   cpuCount: os.cpus().length
+  // });
+
+  return metrics;
 }
 
 /**

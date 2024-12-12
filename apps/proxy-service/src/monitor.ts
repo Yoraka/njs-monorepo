@@ -120,11 +120,11 @@ export class Monitor extends EventEmitter {
       this.stop();
     }
 
-    this.pushInterval = setInterval(() => {
-      this.pushMetrics();
-    }, this.config.monitoring.pushInterval);
-
-    this.logger.info('Monitoring started');
+    this.startSystemMetricsCollection();
+    this.logger.info('监控已启动', {
+      pushInterval: this.config.monitoring.pushInterval,
+      wsPort: this.config.monitoring?.wsPort || 3001
+    });
   }
 
   /**
@@ -139,7 +139,7 @@ export class Monitor extends EventEmitter {
       clearInterval(this.systemMetricsInterval);
       this.systemMetricsInterval = undefined;
     }
-    this.logger.info('Monitoring stopped');
+    this.logger.info('监控已停止');
   }
 
   /**
@@ -149,10 +149,11 @@ export class Monitor extends EventEmitter {
     // 立即收集一次
     this.updateSystemMetrics();
     
-    // 设置定时收集
-    this.systemMetricsInterval = setInterval(() => {
-      this.updateSystemMetrics();
-    }, 1000); // 1秒间隔
+    // 使用固定的收集间隔，不受 pushInterval 影响
+    this.systemMetricsInterval = setInterval(async () => {
+      await this.updateSystemMetrics();
+      this.pushMetrics();
+    }, Math.min(this.config.monitoring.pushInterval || 5000, 5000)); // 最大5秒更新一次
   }
 
   /**
@@ -160,17 +161,17 @@ export class Monitor extends EventEmitter {
    */
   private async updateSystemMetrics(): Promise<void> {
     try {
-      this.currentSystemMetrics = await collectSystemMetrics();
+      const metrics = await collectSystemMetrics();
+      this.currentSystemMetrics = metrics;
+      
+      // 添加调试日志
+      this.logger.debug('系统指标已更新:', {
+        timestamp: new Date().toISOString(),
+        metrics: this.currentSystemMetrics
+      });
     } catch (error) {
-      console.error('Error collecting system metrics:', error);
+      this.logger.error('收集系统指标时出错:', error);
     }
-  }
-
-  /**
-   * 收集系统指标
-   */
-  private async collectSystemMetrics(): Promise<SystemMetrics> {
-    return collectSystemMetrics();
   }
 
   /**
@@ -181,15 +182,32 @@ export class Monitor extends EventEmitter {
       activeConnections: this.metrics.activeConnections,
       totalRequests: this.metrics.totalRequests,
       serverMetrics: this.metrics.serverMetrics,
-      systemMetrics: this.currentSystemMetrics, // 使用当前缓存的系统指标
+      systemMetrics: this.currentSystemMetrics,
       timestamp: Date.now()
     };
 
+    // 添加调试日志
+    this.logger.debug('准备推送监控数据:', {
+      timestamp: new Date().toISOString(),
+      clientCount: this.clients.size,
+      systemMetrics: this.currentSystemMetrics
+    });
+
     const payload = JSON.stringify(monitoringData);
+    let pushCount = 0;
+    
     this.clients.forEach(client => {
       if (client.readyState === WebSocket.OPEN) {
         client.send(payload);
+        pushCount++;
       }
+    });
+
+    // 记录推送结果
+    this.logger.debug('监控数据推送完成:', {
+      timestamp: new Date().toISOString(),
+      totalClients: this.clients.size,
+      successfulPushes: pushCount
     });
 
     this.emit('metricsPushed', monitoringData);

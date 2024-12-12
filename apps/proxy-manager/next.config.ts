@@ -3,14 +3,14 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // reactStrictMode: true,
   // transpilePackages: ["@repo/typescript-config"],
-  // async rewrites() {
-  //   return [
-  //     {
-  //       source: "/api/:path*",
-  //       destination: "http://backend.wm-proxy.com:9000/api/:path*",
-  //     },
-  //   ];
-  // },
+  
+  webpack: (config) => {
+    config.output = {
+      ...config.output,
+      chunkLoadTimeout: 60000, // 设置为60秒
+    }
+    return config
+  },
 };
 
 export default nextConfig;

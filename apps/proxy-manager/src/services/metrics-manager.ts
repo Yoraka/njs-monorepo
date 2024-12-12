@@ -10,6 +10,17 @@ export interface RateMetrics {
   activeConnections: number
 }
 
+// 添加类型定义
+interface ServerMetricsData {
+  serverName: string
+  id: string
+  timestamp: Date
+  requestCount: number
+  inboundTraffic: number
+  outboundTraffic: number
+  connections: number
+}
+
 export class MetricsManager {
   private static instance: MetricsManager | null = null
   private metricsCache: RollingCache<MetricsData>
@@ -17,8 +28,15 @@ export class MetricsManager {
   private aggregationTimer: NodeJS.Timeout | null = null
   private wsClient: ReturnType<typeof getWebSocketClient>
   private isInitialized: boolean = false
+  private initialized = false
+  private initializePromise: Promise<void> | null = null
+  private instanceId: string
 
   private constructor() {
+    this.instanceId = `mm-${Date.now()}`
+    console.log('Debug - MetricsManager 实例创建', {
+      instanceId: this.instanceId
+    })
     // 90秒的缓存，每5秒一条数据，所以是18条数据
     this.metricsCache = new RollingCache<MetricsData>(18)
     this.aggregationInterval = parseInt(process.env.METRICS_AGGREGATION_INTERVAL || '60', 10)
@@ -39,47 +57,100 @@ export class MetricsManager {
   }
 
   public async initialize() {
-    if (this.isInitialized) {
-      console.log('Debug - MetricsManager 已经初始化')
+    if (this.initialized) {
+      console.log('Debug - MetricsManager 已初始化，跳过', {
+        instanceId: this.instanceId
+      })
       return
     }
 
+    if (this.initializePromise) {
+      console.log('Debug - MetricsManager 正在初始化，等待完成', {
+        instanceId: this.instanceId
+      })
+      return this.initializePromise
+    }
+
+    this.initializePromise = this.doInitialize()
+    return this.initializePromise
+  }
+
+  private async doInitialize() {
     try {
-      console.log('Debug - 开始初始化 MetricsManager')
+      console.log('Debug - 开始初始化 MetricsManager', {
+        instanceId: this.instanceId
+      })
+
+      // 初始化 WebSocket 客户端
+      this.wsClient = getWebSocketClient()
       
-      // 监听 metrics 事件
-      this.wsClient.on('metrics', (data: MetricsData) => {
-        console.log('Debug - MetricsManager 收到新数据:', data)
-        this.handleNewMetrics(data)
+      // 添加错误处理和重连逻辑
+      this.wsClient.on('metrics', this.handleNewMetrics.bind(this))
+      this.wsClient.on('connected', () => {
+        console.log('Debug - MetricsManager WebSocket 已连接', {
+          instanceId: this.instanceId
+        })
+      })
+      this.wsClient.on('error', (error) => {
+        console.error('Debug - MetricsManager WebSocket 错误', {
+          instanceId: this.instanceId,
+          error
+        })
+        this.handleConnectionError()
+      })
+      this.wsClient.on('close', () => {
+        console.log('Debug - MetricsManager WebSocket 关闭', {
+          instanceId: this.instanceId
+        })
+        this.handleConnectionError()
       })
 
-      // 等待连接成功
-      await new Promise<void>((resolve, reject) => {
-        if (this.wsClient.ws?.readyState === WebSocket.OPEN) {
-          console.log('Debug - WebSocket 已连接')
-          resolve()
-        } else {
-          this.wsClient.once('connected', () => {
-            console.log('Debug - WebSocket 连接成功')
-            resolve()
-          })
-          
-          setTimeout(() => {
-            reject(new Error('WebSocket 连接超时'))
-          }, 5000)
-        }
-      })
-
+      // 启动聚合定时器
       this.startAggregation()
-      console.log('Debug - 聚合定时器已启动')
-
-      this.isInitialized = true
-      console.log('Debug - MetricsManager 初始化完成')
+      
+      this.initialized = true
+      console.log('Debug - MetricsManager 初始化完成', {
+        instanceId: this.instanceId
+      })
     } catch (error) {
-      console.error('Debug - MetricsManager 初始化失败:', error)
-      this.isInitialized = false
+      console.error('Debug - MetricsManager 初始化失败', {
+        instanceId: this.instanceId,
+        error
+      })
+      this.initialized = false
+      this.initializePromise = null
+      this.handleConnectionError()
       throw error
     }
+  }
+
+  // 添加连接错误处理方法
+  private handleConnectionError() {
+    if (!this.initialized) return
+
+    console.log('Debug - 尝试重新初始化 MetricsManager', {
+      instanceId: this.instanceId
+    })
+
+    // 清理现有状态
+    if (this.aggregationTimer) {
+      clearInterval(this.aggregationTimer)
+      this.aggregationTimer = null
+    }
+
+    // 标记为未初始化
+    this.initialized = false
+    this.initializePromise = null
+
+    // 延迟重试初始化
+    setTimeout(() => {
+      this.initialize().catch(error => {
+        console.error('Debug - MetricsManager 重新初始化失败', {
+          instanceId: this.instanceId,
+          error
+        })
+      })
+    }, 5000) // 5秒后重试
   }
 
   private startAggregation() {
@@ -122,9 +193,10 @@ export class MetricsManager {
 
     // 聚合并保存每个服务器的指标
     const timestamp = new Date()
-    for (const [serverName, serverMetrics] of serverGroups) {
-      // 按时间戳排序
-      const sortedMetrics = serverMetrics.sort((a, b) => a.timestamp - b.timestamp)
+    for (const [serverName, serverMetrics] of Array.from(serverGroups.entries())) {
+      const sortedMetrics = serverMetrics.sort((a: MetricsData, b: MetricsData) => 
+        a.timestamp - b.timestamp
+      )
       if (sortedMetrics.length < 2) continue
 
       // 获取时间窗口的第一个和最后一个数据点
@@ -245,14 +317,23 @@ export class MetricsManager {
 
   // 清理资源
   public dispose() {
-    if (this.isInitialized) {
-      if (this.aggregationTimer) {
-        clearInterval(this.aggregationTimer)
-        this.aggregationTimer = null
-      }
-      this.wsClient.close()
-      this.isInitialized = false
+    console.log('Debug - MetricsManager 正在清理资源', {
+      instanceId: this.instanceId
+    })
+
+    if (this.aggregationTimer) {
+      clearInterval(this.aggregationTimer)
+      this.aggregationTimer = null
     }
+
+    if (this.wsClient) {
+      this.wsClient.removeAllListeners()
+      this.wsClient.close()
+    }
+
+    this.initialized = false
+    this.initializePromise = null
+    MetricsManager.instance = null
   }
 
   // 新增：计算速率的方法
@@ -421,15 +502,35 @@ export class MetricsManager {
 
     // 对每个时间点的重复数据取平均值
     const deduplicatedMetrics: typeof metrics[0][] = []
-    for (const [_, groupMetrics] of timeGroups) {
+    for (const [_, groupMetrics] of Array.from(timeGroups.entries())) {
       if (groupMetrics.length > 0) {
-        // 如果有多条数据，取平均值
+        type MetricType = typeof metrics[0]
         const avgMetric = {
           ...groupMetrics[0],
-          requestCount: Math.round(groupMetrics.reduce((sum, m) => sum + m.requestCount, 0) / groupMetrics.length),
-          inboundTraffic: Math.round(groupMetrics.reduce((sum, m) => sum + m.inboundTraffic, 0) / groupMetrics.length),
-          outboundTraffic: Math.round(groupMetrics.reduce((sum, m) => sum + m.outboundTraffic, 0) / groupMetrics.length),
-          connections: Math.round(groupMetrics.reduce((sum, m) => sum + m.connections, 0) / groupMetrics.length)
+          requestCount: Math.round(
+            groupMetrics.reduce(
+              (sum: number, m: MetricType) => sum + m.requestCount, 
+              0
+            ) / groupMetrics.length
+          ),
+          inboundTraffic: Math.round(
+            groupMetrics.reduce(
+              (sum: number, m: MetricType) => sum + m.inboundTraffic, 
+              0
+            ) / groupMetrics.length
+          ),
+          outboundTraffic: Math.round(
+            groupMetrics.reduce(
+              (sum: number, m: MetricType) => sum + m.outboundTraffic, 
+              0
+            ) / groupMetrics.length
+          ),
+          connections: Math.round(
+            groupMetrics.reduce(
+              (sum: number, m: MetricType) => sum + m.connections, 
+              0
+            ) / groupMetrics.length
+          )
         }
         deduplicatedMetrics.push(avgMetric)
       }
@@ -448,13 +549,26 @@ export class MetricsManager {
     // 计算每个聚合时间点的速率
     const result: Array<RateMetrics & { timestamp: Date }> = []
     
-    for (const [timeKey, groupMetrics] of aggregateGroups) {
+    for (const [timeKey, groupMetrics] of Array.from(aggregateGroups.entries())) {
       const timestamp = new Date(parseInt(timeKey))
-      // 累加所有服务器的增量数据
-      const totalRequests = groupMetrics.reduce((sum, m) => sum + m.requestCount, 0)
-      const totalInbound = groupMetrics.reduce((sum, m) => sum + m.inboundTraffic, 0)
-      const totalOutbound = groupMetrics.reduce((sum, m) => sum + m.outboundTraffic, 0)
-      const totalConnections = groupMetrics.reduce((sum, m) => sum + m.connections, 0)
+      type MetricType = typeof metrics[0]
+      
+      const totalRequests = groupMetrics.reduce(
+        (sum: number, m: MetricType) => sum + m.requestCount, 
+        0
+      )
+      const totalInbound = groupMetrics.reduce(
+        (sum: number, m: MetricType) => sum + m.inboundTraffic, 
+        0
+      )
+      const totalOutbound = groupMetrics.reduce(
+        (sum: number, m: MetricType) => sum + m.outboundTraffic, 
+        0
+      )
+      const totalConnections = groupMetrics.reduce(
+        (sum: number, m: MetricType) => sum + m.connections, 
+        0
+      )
 
       // 转换为每秒速率
       const secondsInInterval = aggregateInterval * 60
@@ -539,24 +653,37 @@ export class MetricsManager {
       timeGroups.get(key)?.push(metric)
     })
 
-    // 对每个时间点的重复数据取平均值
-    const deduplicatedMetrics: typeof metrics[0][] = []
-    for (const [_, groupMetrics] of timeGroups) {
+    // 修改类型定义，使用 ServerMetricsData
+    const deduplicatedMetrics: ServerMetricsData[] = []
+    
+    // 使用 Array.from 来安全地迭代 Map
+    for (const [_, groupMetrics] of Array.from(timeGroups.entries())) {
       if (groupMetrics.length > 0) {
-        // 如果有多条数据，取平均值
         const avgMetric = {
           ...groupMetrics[0],
-          requestCount: Math.round(groupMetrics.reduce((sum, m) => sum + m.requestCount, 0) / groupMetrics.length),
-          inboundTraffic: Math.round(groupMetrics.reduce((sum, m) => sum + m.inboundTraffic, 0) / groupMetrics.length),
-          outboundTraffic: Math.round(groupMetrics.reduce((sum, m) => sum + m.outboundTraffic, 0) / groupMetrics.length),
-          connections: Math.round(groupMetrics.reduce((sum, m) => sum + m.connections, 0) / groupMetrics.length)
+          requestCount: Math.round(groupMetrics.reduce(
+            (sum: number, m: typeof groupMetrics[0]) => sum + m.requestCount, 
+            0
+          ) / groupMetrics.length),
+          inboundTraffic: Math.round(groupMetrics.reduce(
+            (sum: number, m: typeof groupMetrics[0]) => sum + m.inboundTraffic, 
+            0
+          ) / groupMetrics.length),
+          outboundTraffic: Math.round(groupMetrics.reduce(
+            (sum: number, m: typeof groupMetrics[0]) => sum + m.outboundTraffic, 
+            0
+          ) / groupMetrics.length),
+          connections: Math.round(groupMetrics.reduce(
+            (sum: number, m: typeof groupMetrics[0]) => sum + m.connections, 
+            0
+          ) / groupMetrics.length)
         }
         deduplicatedMetrics.push(avgMetric)
       }
     }
 
     // 按聚合间隔分组
-    const aggregateGroups = new Map<string, typeof metrics[0][]>()
+    const aggregateGroups = new Map<string, ServerMetricsData[]>()
     deduplicatedMetrics.forEach(metric => {
       const timeKey = Math.floor(metric.timestamp.getTime() / (aggregateInterval * 60 * 1000)) * (aggregateInterval * 60 * 1000)
       if (!aggregateGroups.has(timeKey.toString())) {
@@ -568,13 +695,27 @@ export class MetricsManager {
     // 计算每个聚合时间点的速率
     const result: Array<RateMetrics & { timestamp: Date }> = []
     
-    for (const [timeKey, groupMetrics] of aggregateGroups) {
+    // 使用 Array.from 来安全地迭代 Map
+    for (const [timeKey, groupMetrics] of Array.from(aggregateGroups.entries())) {
       const timestamp = new Date(parseInt(timeKey))
-      // 累加所有服务器的增量数据
-      const totalRequests = groupMetrics.reduce((sum, m) => sum + m.requestCount, 0)
-      const totalInbound = groupMetrics.reduce((sum, m) => sum + m.inboundTraffic, 0)
-      const totalOutbound = groupMetrics.reduce((sum, m) => sum + m.outboundTraffic, 0)
-      const totalConnections = groupMetrics.reduce((sum, m) => sum + m.connections, 0)
+      
+      // 添加类型定义到 reduce 参数
+      const totalRequests = groupMetrics.reduce(
+        (sum: number, m: ServerMetricsData) => sum + m.requestCount, 
+        0
+      )
+      const totalInbound = groupMetrics.reduce(
+        (sum: number, m: ServerMetricsData) => sum + m.inboundTraffic, 
+        0
+      )
+      const totalOutbound = groupMetrics.reduce(
+        (sum: number, m: ServerMetricsData) => sum + m.outboundTraffic, 
+        0
+      )
+      const totalConnections = groupMetrics.reduce(
+        (sum: number, m: ServerMetricsData) => sum + m.connections, 
+        0
+      )
 
       // 转换为每秒速率
       const secondsInInterval = aggregateInterval * 60
@@ -590,8 +731,6 @@ export class MetricsManager {
     return result.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
   }
 
-
-
   // 添加一个方法来检查缓存状态
   public debugCacheStatus() {
     const allData = this.metricsCache.getAll()
@@ -600,6 +739,15 @@ export class MetricsManager {
       timestamps: allData.map(d => d.timestamp),
       servers: allData.map(d => Object.keys(d.serverMetrics))
     })
+  }
+
+  public getStatus() {
+    return {
+      instanceId: this.instanceId,
+      initialized: this.initialized,
+      wsStatus: this.wsClient?.getStatus(),
+      cacheSize: this.metricsCache.getAll().length
+    }
   }
 }
 
