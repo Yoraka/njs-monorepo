@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/card';
 import { Trash2, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { UpstreamPanel } from '@/app/components/upstream-panel';
+import { useTranslation } from 'react-i18next';
 
 interface ConfigFormProps {
   config?: ServerConfig;
@@ -24,6 +25,7 @@ export default function ConfigForm({
   onChange,
   onUpstreamsChange 
 }: ConfigFormProps) {
+  const { t } = useTranslation();
   const [showUpstreamPanel, setShowUpstreamPanel] = useState(false);
 
   if (!config) return null;
@@ -84,7 +86,7 @@ export default function ConfigForm({
           {values?.map((location, index) => (
             <Card key={index} className="p-4">
               <div className="flex justify-between items-start mb-4">
-                <span className="text-sm font-medium">路径配置 {index + 1}</span>
+                <span className="text-sm font-medium">{t('proxy.pathConfig')} {index + 1}</span>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -105,7 +107,7 @@ export default function ConfigForm({
             size="sm"
             onClick={handleAdd}
           >
-            添加{field.title}
+            {t('proxy.addPathConfig')}
           </Button>
         </div>
       );
@@ -116,7 +118,7 @@ export default function ConfigForm({
         {values?.map((value, index) => (
           <Card key={index} className="p-4">
             <div className="flex justify-between items-start mb-4">
-              <span className="text-sm font-medium">项目 {index + 1}</span>
+              <span className="text-sm font-medium">{t('common.item')} {index + 1}</span>
               <Button
                 variant="ghost"
                 size="icon"
@@ -128,7 +130,7 @@ export default function ConfigForm({
             <div className="grid gap-4">
               {field.children?.map(childField => (
                 <div key={childField.id} className="grid grid-cols-4 items-center gap-4">
-                  <Label className="text-right">{childField.title}</Label>
+                  <Label className="text-right">{t(`proxy.fields.${childField.id}`)}</Label>
                   <div className="col-span-3">
                     {childField.id === 'upstream' ? (
                       <Select
@@ -136,12 +138,12 @@ export default function ConfigForm({
                         onValueChange={(v) => handleItemChange(index, { [childField.id]: v })}
                       >
                         <SelectTrigger>
-                          <SelectValue placeholder="选择上游服务器" />
+                          <SelectValue placeholder={t('proxy.selectUpstream')} />
                         </SelectTrigger>
                         <SelectContent>
                           {upstreams?.map(upstream => (
                             <SelectItem key={upstream.name} value={upstream.name}>
-                              {upstream.name}
+                              {upstream.name} ({upstream.servers.length} {t('proxy.servers')})
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -164,7 +166,7 @@ export default function ConfigForm({
           size="sm"
           onClick={handleAdd}
         >
-          添加{field.title}
+          {t('common.add')} {field.title}
         </Button>
       </div>
     );
@@ -296,7 +298,7 @@ export default function ConfigForm({
       <div className="space-y-4">
         <div className="grid grid-cols-4 gap-4">
           <div className="col-span-1">
-            <Label>路径</Label>
+            <Label>{t('proxy.path')}</Label>
             <Input
               value={location.path || '/'}
               onChange={e => onChange({ path: e.target.value })}
@@ -304,22 +306,22 @@ export default function ConfigForm({
             />
           </div>
           <div className="col-span-3">
-            <Label>代理类型</Label>
+            <Label>{t('proxy.proxyType')}</Label>
             <Select
               value={proxyType}
               onValueChange={handleProxyTypeChange}
             >
               <SelectTrigger className="w-full">
                 <SelectValue>
-                  {proxyType === 'upstream' && '上游服务器'}
-                  {proxyType === 'proxy_pass' && '直接代理'}
-                  {proxyType === 'static' && '静态响应'}
+                  {proxyType === 'upstream' && t('proxy.upstream')}
+                  {proxyType === 'proxy_pass' && t('proxy.proxyPass')}
+                  {proxyType === 'static' && t('proxy.staticResponse')}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="upstream">上游服务器</SelectItem>
-                <SelectItem value="proxy_pass">直接代理</SelectItem>
-                <SelectItem value="static">静态响应</SelectItem>
+                <SelectItem value="upstream">{t('proxy.upstream')}</SelectItem>
+                <SelectItem value="proxy_pass">{t('proxy.proxyPass')}</SelectItem>
+                <SelectItem value="static">{t('proxy.staticResponse')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -328,13 +330,13 @@ export default function ConfigForm({
         {proxyType === 'upstream' && (
           <div className="space-y-2">
             <div className="flex justify-between items-center">
-              <Label>选择上游服务器</Label>
+              <Label>{t('proxy.selectUpstream')}</Label>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setShowUpstreamPanel(true)}
               >
-                新建/配置上游服务器
+                {t('proxy.newUpstream')}
               </Button>
             </div>
             <Select
@@ -342,12 +344,12 @@ export default function ConfigForm({
               onValueChange={value => onChange({ upstream: value })}
             >
               <SelectTrigger>
-                <SelectValue placeholder="选择上游服务器" />
+                <SelectValue placeholder={t('proxy.selectUpstream')} />
               </SelectTrigger>
               <SelectContent>
                 {upstreams?.map(upstream => (
                   <SelectItem key={upstream.name} value={upstream.name}>
-                    {upstream.name} ({upstream.servers.length} 个服务器)
+                    {upstream.name} ({upstream.servers.length} {t('proxy.servers')})
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -357,7 +359,7 @@ export default function ConfigForm({
 
         {proxyType === 'proxy_pass' && (
           <div>
-            <Label>代理地址</Label>
+            <Label>{t('proxy.proxyAddress')}</Label>
             <Input
               value={location.proxy_pass || ''}
               onChange={e => onChange({ proxy_pass: e.target.value })}
@@ -369,7 +371,7 @@ export default function ConfigForm({
         {proxyType === 'static' && (
           <div className="space-y-4">
             <div>
-              <Label>静态文件根目录</Label>
+              <Label>{t('proxy.staticFileRoot')}</Label>
               <Input
                 value={location.root || ''}
                 onChange={e => onChange({ root: e.target.value })}
@@ -377,7 +379,7 @@ export default function ConfigForm({
               />
             </div>
             <div>
-              <Label>直接返回</Label>
+              <Label>{t('proxy.directReturn')}</Label>
               <Input
                 value={location.return || ''}
                 onChange={e => onChange({ return: e.target.value })}
@@ -410,7 +412,7 @@ export default function ConfigForm({
           rateLimit: {
             windowMs: 60000,
             max: 100,
-            message: '请求过于频繁，请稍后再试',
+            message: t('proxy.errorMessage'),
             statusCode: 429
           },
           ipFilter: {
@@ -439,11 +441,11 @@ export default function ConfigForm({
     const defaultRateLimit: RateLimitConfig = {
       windowMs: 60000,  // 1分钟
       max: 100,        // 最大100次请求
-            message: '请求过于频繁，请稍后再试',
-            statusCode: 429
+      message: t('proxy.errorMessage'),
+      statusCode: 429
     };
 
-    // 获取当前的速率限制配置，确保所有必需��段都有值
+    // 获取当前的速率限制配置，确保所有必需段都有值
     const getCurrentRateLimit = (): RateLimitConfig => ({
       windowMs: config.rateLimit?.windowMs ?? defaultRateLimit.windowMs,
       max: config.rateLimit?.max ?? defaultRateLimit.max,
@@ -484,7 +486,7 @@ export default function ConfigForm({
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <Label>自定义安全设置</Label>
+          <Label>{t('proxy.customSecurity')}</Label>
           <Switch
             checked={isCustomSecurityEnabled}
             onCheckedChange={handleCustomSecurityToggle}
@@ -492,7 +494,7 @@ export default function ConfigForm({
         </div>
 
         {!isCustomSecurityEnabled && (
-          <p className="text-sm text-gray-500">使用默认安全设置</p>
+          <p className="text-sm text-gray-500">{t('proxy.useDefaultSecurity')}</p>
         )}
 
         {isCustomSecurityEnabled && (
@@ -500,7 +502,7 @@ export default function ConfigForm({
             {/* 速率限制设置 */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <Label>速率限制</Label>
+                <Label>{t('proxy.rateLimit')}</Label>
                 <Switch
                   checked={!!config.rateLimit}
                   onCheckedChange={(checked) => {
@@ -514,7 +516,7 @@ export default function ConfigForm({
               {config.rateLimit && (
                 <div className="grid gap-4 pl-4">
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right">时间窗口(ms)</Label>
+                    <Label className="text-right">{t('proxy.windowMs')}</Label>
                     <Input
                       type="number"
                       className="col-span-3"
@@ -531,7 +533,7 @@ export default function ConfigForm({
                     />
                   </div>
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right">最大请求数</Label>
+                    <Label className="text-right">{t('proxy.maxRequests')}</Label>
                     <Input
                       type="number"
                       className="col-span-3"
@@ -548,7 +550,7 @@ export default function ConfigForm({
                     />
                   </div>
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right">错误消息</Label>
+                    <Label className="text-right">{t('proxy.errorMessage')}</Label>
                     <Input
                       className="col-span-3"
                       value={config.rateLimit.message}
@@ -564,7 +566,7 @@ export default function ConfigForm({
                     />
                   </div>
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right">状态码</Label>
+                    <Label className="text-right">{t('proxy.statusCode')}</Label>
                     <Input
                       type="number"
                       className="col-span-3"
@@ -587,7 +589,7 @@ export default function ConfigForm({
             {/* IP过滤设置 */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <Label>IP过滤</Label>
+                <Label>{t('proxy.ipFilter')}</Label>
                 <Switch
                   checked={!!config.ipFilter}
                   onCheckedChange={(checked) => {
@@ -601,10 +603,10 @@ export default function ConfigForm({
               {config.ipFilter && (
                 <div className="grid gap-4 pl-4">
                   <div className="space-y-2">
-                    <Label>白名单IP</Label>
+                    <Label>{t('proxy.whitelist')}</Label>
                     <div className="flex gap-2">
                       <Input
-                        placeholder="输入IP地址后回车"
+                        placeholder={t('proxy.enterIp')}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
                             const input = e.currentTarget;
@@ -651,10 +653,10 @@ export default function ConfigForm({
                   </div>
                   
                   <div className="space-y-2">
-                    <Label>黑名单IP</Label>
+                    <Label>{t('proxy.blacklist')}</Label>
                     <div className="flex gap-2">
                       <Input
-                        placeholder="输入IP地址后回车"
+                        placeholder={t('proxy.enterIp')}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
                             const input = e.currentTarget;
@@ -706,7 +708,7 @@ export default function ConfigForm({
             {/* CSRF防护设置 */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <Label>CSRF防护</Label>
+                <Label>{t('proxy.csrfProtection')}</Label>
                 <Switch
                   checked={!!config.csrf?.enabled}
                   onCheckedChange={(checked) => {
@@ -720,7 +722,7 @@ export default function ConfigForm({
               {config.csrf?.enabled && (
                 <div className="grid gap-4 pl-4">
                   <div className="flex items-center gap-4">
-                    <Label>强制所有请求检查</Label>
+                    <Label>{t('proxy.forceAllRequests')}</Label>
                     <Switch
                       checked={!!config.csrf.forced}
                       onCheckedChange={(checked) => {
@@ -736,10 +738,10 @@ export default function ConfigForm({
                   </div>
                   
                   <div className="space-y-2">
-                    <Label>自定义保护路径</Label>
+                    <Label>{t('proxy.customProtectedPaths')}</Label>
                     <div className="flex gap-2">
                       <Input
-                        placeholder="输入路径后回车"
+                        placeholder={t('proxy.enterPath')}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
                             const input = e.currentTarget;
@@ -786,10 +788,10 @@ export default function ConfigForm({
                   </div>
 
                   <div className="space-y-2">
-                    <Label>排除路径</Label>
+                    <Label>{t('proxy.excludePaths')}</Label>
                     <div className="flex gap-2">
                       <Input
-                        placeholder="输入排除路径后回车"
+                        placeholder={t('proxy.enterPath')}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
                             const input = e.currentTarget;
@@ -836,10 +838,10 @@ export default function ConfigForm({
                   </div>
 
                   <div className="space-y-2">
-                    <Label>Token名称</Label>
+                    <Label>{t('proxy.tokenName')}</Label>
                     <div className="flex gap-2">
                       <Input
-                        placeholder="输入Token名称后回车"
+                        placeholder={t('proxy.enterTokenName')}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
                             const input = e.currentTarget;
@@ -976,7 +978,7 @@ export default function ConfigForm({
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <Label>自定义高级设置</Label>
+          <Label>{t('proxy.customAdvanced')}</Label>
           <Switch
             checked={isCustomAdvancedEnabled}
             onCheckedChange={handleCustomAdvancedToggle}
@@ -984,7 +986,7 @@ export default function ConfigForm({
         </div>
 
         {!isCustomAdvancedEnabled && (
-          <p className="text-sm text-gray-500">使用默认高级设置</p>
+          <p className="text-sm text-gray-500">{t('proxy.useDefaultAdvanced')}</p>
         )}
 
         {isCustomAdvancedEnabled && (
@@ -992,7 +994,7 @@ export default function ConfigForm({
             {/* 自定义响应头 */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <Label>自定义响应头</Label>
+                <Label>{t('proxy.customHeaders')}</Label>
                 <Switch
                   checked={!!config.headers}
                   onCheckedChange={(checked) => {
@@ -1006,10 +1008,10 @@ export default function ConfigForm({
               {config.headers && (
                 <div className="grid gap-4 pl-4">
                   <div className="space-y-2">
-                    <Label>添加响应头</Label>
+                    <Label>{t('proxy.addHeaders')}</Label>
                     <div className="grid grid-cols-2 gap-2">
-                      <Input placeholder="Header Name" />
-                      <Input placeholder="Header Value" />
+                      <Input placeholder={t('proxy.headerName')} />
+                      <Input placeholder={t('proxy.headerValue')} />
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {Object.entries(getCurrentHeaders().add).map(([key, value]) => (
@@ -1039,10 +1041,10 @@ export default function ConfigForm({
                   </div>
                   
                   <div className="space-y-2">
-                    <Label>移除响应头</Label>
+                    <Label>{t('proxy.removeHeaders')}</Label>
                     <div className="flex gap-2">
                       <Input
-                        placeholder="输入要移除的响应头名称后回车"
+                        placeholder={t('proxy.enterHeaderName')}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
                             const input = e.currentTarget;
@@ -1094,7 +1096,7 @@ export default function ConfigForm({
             {/* 健康检查设置 */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <Label>健康检查</Label>
+                <Label>{t('proxy.healthCheck')}</Label>
                 <Switch
                   checked={!!config.healthCheck?.enabled}
                   onCheckedChange={(checked) => {
@@ -1108,7 +1110,7 @@ export default function ConfigForm({
               {config.healthCheck?.enabled && (
                 <div className="grid gap-4 pl-4">
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right">检查类型</Label>
+                    <Label className="text-right">{t('proxy.checkType')}</Label>
                     <Select
                       value={config.healthCheck.type}
                       onValueChange={(value: 'http' | 'tcp') => {
@@ -1133,7 +1135,7 @@ export default function ConfigForm({
 
                   {config.healthCheck.type === 'http' && (
                     <div className="grid grid-cols-4 items-center gap-4">
-                      <Label className="text-right">检查路径</Label>
+                      <Label className="text-right">{t('proxy.checkPath')}</Label>
                       <Input
                         className="col-span-3"
                         value={config.healthCheck.path}
@@ -1151,7 +1153,7 @@ export default function ConfigForm({
                   )}
 
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right">检查间隔(ms)</Label>
+                    <Label className="text-right">{t('proxy.checkInterval')}</Label>
                     <Input
                       type="number"
                       className="col-span-3"
@@ -1169,7 +1171,7 @@ export default function ConfigForm({
                   </div>
 
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right">超时时间(ms)</Label>
+                    <Label className="text-right">{t('proxy.timeout')}</Label>
                     <Input
                       type="number"
                       className="col-span-3"
@@ -1187,7 +1189,7 @@ export default function ConfigForm({
                   </div>
 
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right">重试次数</Label>
+                    <Label className="text-right">{t('proxy.retries')}</Label>
                     <Input
                       type="number"
                       className="col-span-3"
@@ -1225,12 +1227,12 @@ export default function ConfigForm({
         >
           <div className="fixed inset-x-0 top-0 bg-white p-6 shadow-lg max-w-4xl mx-auto mt-20 rounded-lg">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-medium">配置上游服务器</h2>
+              <h2 className="text-lg font-medium">{t('proxy.configUpstream')}</h2>
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => setShowUpstreamPanel(false)}
-                aria-label="关闭"
+                aria-label={t('common.close')}
               >
                 <X className="h-4 w-4" />
               </Button>
@@ -1278,7 +1280,7 @@ export default function ConfigForm({
 
       {/* 安全设置部分 */}
       <div className="space-y-4">
-        <h3 className="text-lg font-medium">安全设置</h3>
+        <h3 className="text-lg font-medium">{t('proxy.securitySettings')}</h3>
         <Card className="p-6">
           <SecuritySettingsForm config={config} onChange={onChange} />
         </Card>
@@ -1286,7 +1288,7 @@ export default function ConfigForm({
 
       {/* 高级设置部分 */}
       <div className="space-y-4">
-        <h3 className="text-lg font-medium">高级设置</h3>
+        <h3 className="text-lg font-medium">{t('proxy.advancedSettings')}</h3>
         <Card className="p-6">
           <AdvancedSettingsForm config={config} onChange={onChange} />
         </Card>

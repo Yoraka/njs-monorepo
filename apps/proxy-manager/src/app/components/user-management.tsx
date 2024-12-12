@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { toast } from "@/hooks/use-toast"
 import { Pencil, Trash2, UserPlus } from "lucide-react"
+import { useTranslation } from "react-i18next"
 
 type User = {
   id: string
@@ -21,6 +22,7 @@ type User = {
 }
 
 export default function UserManagement() {
+  const { t } = useTranslation()
   const { data: session } = useSession()
   const [users, setUsers] = useState<User[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -224,19 +226,19 @@ export default function UserManagement() {
   return (
     <Card className="w-full">
       <CardHeader>
-        <CardTitle>用户管理</CardTitle>
+        <CardTitle>{t('userManagement.title')}</CardTitle>
         <CardDescription>
           {isAdmin 
-            ? "管理所有用户账户和权限" 
-            : "查看用户并管理您的密码"
+            ? t('userManagement.manageAllUsersAndPermissions') 
+            : t('userManagement.viewUsersAndManageYourPassword')
           }
         </CardDescription>
       </CardHeader>
       <CardContent>
         <Tabs defaultValue="users">
           <TabsList>
-            <TabsTrigger value="users">用户</TabsTrigger>
-            <TabsTrigger value="password">修改密码</TabsTrigger>
+            <TabsTrigger value="users">{t('userManagement.users')}</TabsTrigger>
+            <TabsTrigger value="password">{t('userManagement.changePassword')}</TabsTrigger>
           </TabsList>
           <TabsContent value="users">
             <div className="space-y-4">
@@ -245,20 +247,20 @@ export default function UserManagement() {
                   <DialogTrigger asChild>
                     <Button>
                       <UserPlus className="mr-2 h-4 w-4" />
-                      添加新用户
+                      {t('userManagement.addNewUser')}
                     </Button>
                   </DialogTrigger>
                   <DialogContent>
                     <DialogHeader>
-                      <DialogTitle>添加新用户</DialogTitle>
+                      <DialogTitle>{t('userManagement.addNewUser')}</DialogTitle>
                       <DialogDescription>
-                        输入新用户的详细信息。默认密码是 "123"
+                        {t('userManagement.enterNewUserDetails')}
                       </DialogDescription>
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
                       <div className="grid grid-cols-4 items-center gap-4">
                         <Label htmlFor="new-username" className="text-right">
-                          用户名
+                          {t('userManagement.username')}
                         </Label>
                         <Input
                           id="new-username"
@@ -269,7 +271,7 @@ export default function UserManagement() {
                       </div>
                       <div className="grid grid-cols-4 items-center gap-4">
                         <Label htmlFor="new-email" className="text-right">
-                          邮箱
+                          {t('userManagement.email')}
                         </Label>
                         <Input
                           id="new-email"
@@ -281,21 +283,21 @@ export default function UserManagement() {
                       </div>
                       <div className="grid grid-cols-4 items-center gap-4">
                         <Label htmlFor="new-role" className="text-right">
-                          角色
+                          {t('userManagement.role')}
                         </Label>
                         <Select onValueChange={(value) => setNewUser({ ...newUser, role: value as "admin" | "user" })}>
                           <SelectTrigger className="col-span-3">
-                            <SelectValue placeholder="Select a role" />
+                            <SelectValue placeholder={t('userManagement.selectARole')} />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="admin">管理员</SelectItem>
-                            <SelectItem value="user">用户</SelectItem>
+                            <SelectItem value="admin">{t('userManagement.admin')}</SelectItem>
+                            <SelectItem value="user">{t('userManagement.user')}</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
                     </div>
                     <DialogFooter>
-                      <Button onClick={handleAddUser}>添加用户</Button>
+                      <Button onClick={handleAddUser}>{t('userManagement.addUser')}</Button>
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
@@ -303,10 +305,10 @@ export default function UserManagement() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>用户名</TableHead>
-                    <TableHead>邮箱</TableHead>
-                    <TableHead>角色</TableHead>
-                    {isAdmin && <TableHead>操作</TableHead>}
+                    <TableHead>{t('userManagement.username')}</TableHead>
+                    <TableHead>{t('userManagement.email')}</TableHead>
+                    <TableHead>{t('userManagement.role')}</TableHead>
+                    {isAdmin && <TableHead>{t('userManagement.actions')}</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -324,7 +326,7 @@ export default function UserManagement() {
                               onClick={() => handleEditUser(user)}
                             >
                               <Pencil className="h-4 w-4" />
-                              <span className="sr-only">编辑</span>
+                              <span className="sr-only">{t('userManagement.edit')}</span>
                             </Button>
                             {user.id !== currentUserId && (
                               <Button 
@@ -333,7 +335,7 @@ export default function UserManagement() {
                                 onClick={() => handleDeleteUser(user.id)}
                               >
                                 <Trash2 className="h-4 w-4" />
-                                <span className="sr-only">删除</span>
+                                <span className="sr-only">{t('userManagement.delete')}</span>
                               </Button>
                             )}
                           </div>
@@ -345,7 +347,7 @@ export default function UserManagement() {
               </Table>
               <div className="flex items-center justify-between">
                 <div className="text-sm text-muted-foreground">
-                  显示 {page * pageSize + 1} 到 {Math.min((page + 1) * pageSize, totalUsers)} 的 {totalUsers} 用户
+                  {t('userManagement.display')} {page * pageSize + 1} {t('userManagement.to')} {Math.min((page + 1) * pageSize, totalUsers)} {t('userManagement.of')} {totalUsers} {t('userManagement.users')}
                 </div>
                 <div className="flex space-x-2">
                   <Button
@@ -354,7 +356,7 @@ export default function UserManagement() {
                     onClick={handlePreviousPage}
                     disabled={page === 0}
                   >
-                    上一页
+                    {t('userManagement.previousPage')}
                   </Button>
                   <Button
                     variant="outline"
@@ -362,7 +364,7 @@ export default function UserManagement() {
                     onClick={handleNextPage}
                     disabled={page >= totalPages - 1}
                   >
-                    下一页
+                    {t('userManagement.nextPage')}
                   </Button>
                 </div>
               </div>
@@ -371,21 +373,21 @@ export default function UserManagement() {
           <TabsContent value="password">
             <Card>
               <CardHeader>
-                <CardTitle>修改密码</CardTitle>
+                <CardTitle>{t('userManagement.changePassword')}</CardTitle>
                 <CardDescription>
-                  {isAdmin ? "更改任何用户的密码" : "更新您的账户密码"}
+                  {isAdmin ? t('userManagement.changeAnyUserPassword') : t('userManagement.updateYourAccountPassword')}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {isAdmin && (
                   <div className="space-y-2">
-                    <Label>选择用户</Label>
+                    <Label>{t('userManagement.selectAUser')}</Label>
                     <Select 
                       value={passwordChangeUserId || currentUserId || ''} 
                       onValueChange={(value) => setPasswordChangeUserId(value)}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="选择用户" />
+                        <SelectValue placeholder={t('userManagement.selectAUser')} />
                       </SelectTrigger>
                       <SelectContent>
                         {users.map(user => (
@@ -399,7 +401,7 @@ export default function UserManagement() {
                 )}
                 {(!isAdmin || passwordChangeUserId === currentUserId) && (
                   <div className="space-y-2">
-                    <Label htmlFor="current-password">当前密码</Label>
+                    <Label htmlFor="current-password">{t('userManagement.currentPassword')}</Label>
                     <Input
                       id="current-password"
                       type="password"
@@ -409,7 +411,7 @@ export default function UserManagement() {
                   </div>
                 )}
                 <div className="space-y-2">
-                  <Label htmlFor="new-password">新密码</Label>
+                  <Label htmlFor="new-password">{t('userManagement.newPassword')}</Label>
                   <Input
                     id="new-password"
                     type="password"
@@ -418,7 +420,7 @@ export default function UserManagement() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="confirm-password">确认新密码</Label>
+                  <Label htmlFor="confirm-password">{t('userManagement.confirmNewPassword')}</Label>
                   <Input
                     id="confirm-password"
                     type="password"
@@ -427,7 +429,7 @@ export default function UserManagement() {
                   />
                 </div>
                 <Button onClick={handleChangePassword}>
-                  修改密码
+                  {t('userManagement.changePassword')}
                 </Button>
               </CardContent>
             </Card>
@@ -438,16 +440,16 @@ export default function UserManagement() {
         <Dialog open={!!editingUser} onOpenChange={() => setEditingUser(null)}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>编辑用户</DialogTitle>
+              <DialogTitle>{t('userManagement.editUser')}</DialogTitle>
               <DialogDescription>
-                更新用户的详细信息。
+                {t('userManagement.updateUserDetails')}
               </DialogDescription>
             </DialogHeader>
             {editingUser && (
               <div className="grid gap-4 py-4">
                 <div className="grid grid-cols-4 items-center gap-4">
                   <Label htmlFor="edit-username" className="text-right">
-                    用户名
+                    {t('userManagement.username')}
                   </Label>
                   <Input
                     id="edit-username"
@@ -458,7 +460,7 @@ export default function UserManagement() {
                 </div>
                 <div className="grid grid-cols-4 items-center gap-4">
                   <Label htmlFor="edit-email" className="text-right">
-                    邮箱
+                    {t('userManagement.email')}
                   </Label>
                   <Input
                     id="edit-email"
@@ -470,7 +472,7 @@ export default function UserManagement() {
                 </div>
                 <div className="grid grid-cols-4 items-center gap-4">
                   <Label htmlFor="edit-role" className="text-right">
-                    角色
+                    {t('userManagement.role')}
                   </Label>
                   <Select
                     value={editingUser.role}
@@ -480,15 +482,15 @@ export default function UserManagement() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="admin">管理员</SelectItem>
-                      <SelectItem value="user">用户</SelectItem>
+                      <SelectItem value="admin">{t('userManagement.admin')}</SelectItem>
+                      <SelectItem value="user">{t('userManagement.user')}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
               </div>
             )}
             <DialogFooter>
-              <Button onClick={handleUpdateUser}>更新用户</Button>
+              <Button onClick={handleUpdateUser}>{t('userManagement.updateUser')}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

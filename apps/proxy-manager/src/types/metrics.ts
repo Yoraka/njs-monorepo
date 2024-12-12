@@ -8,7 +8,8 @@ export interface ServerMetrics {
   export interface SystemMetrics {
     cpuUsage: number
     memoryUsage: number
-    diskIO: number
+    memoryPercentage: number
+    diskUsage: number
   }
   
   export interface MetricsData {

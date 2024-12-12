@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useTranslation } from 'react-i18next'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ServerConfigPanel } from "./config-panels"
@@ -8,20 +9,20 @@ import { UpstreamPanel } from "./upstream-panel"
 import { JsonConfig, ServerConfig, ConfigGroup, UpstreamConfig } from "@/types/proxy-config"
 
 // 定义配置模板
-const SERVER_CONFIG_TEMPLATE: ConfigGroup[] = [
+const getServerConfigTemplate = (t: any): ConfigGroup[] => [
   {
     id: 'basic',
-    title: '基本设置',
+    title: t('proxyManagement.serverConfig.groups.basic'),
     fields: [
       {
         id: 'name',
-        title: '服务器名称',
+        title: t('proxyManagement.serverConfig.fields.name'),
         type: 'text',
         required: true,
       },
       {
         id: 'listen',
-        title: '监听端口',
+        title: t('proxyManagement.serverConfig.fields.listen'),
         type: 'number',
         required: true,
         validation: {
@@ -31,46 +32,46 @@ const SERVER_CONFIG_TEMPLATE: ConfigGroup[] = [
       },
       {
         id: 'serverName',
-        title: '服务器域名',
+        title: t('proxyManagement.serverConfig.fields.serverName'),
         type: 'text',
-        description: '服务器的域名'
+        description: t('proxyManagement.serverConfig.fields.serverNameDesc')
       },
       {
         id: 'ssl',
-        title: 'SSL',
+        title: t('proxyManagement.serverConfig.fields.ssl'),
         type: 'boolean',
         defaultValue: false,
-        description: '启用HTTPS'
+        description: t('proxyManagement.serverConfig.fields.sslDesc')
       }
     ]
   },
   {
     id: 'security',
-    title: '安全设置',
+    title: t('proxyManagement.serverConfig.groups.security'),
     fields: [
       {
         id: 'rateLimit',
-        title: '速率限制',
+        title: t('proxyManagement.security.rateLimit.title'),
         type: 'object',
         fields: [
           {
             id: 'enabled',
-            title: '启用',
+            title: t('common.enabled'),
             type: 'boolean'
           },
           {
             id: 'max',
-            title: '最大请求数',
+            title: t('proxyManagement.security.rateLimit.max'),
             type: 'number'
           },
           {
             id: 'windowMs',
-            title: '时间窗口(ms)',
+            title: t('proxyManagement.security.rateLimit.windowMs'),
             type: 'number'
           },
           {
             id: 'statusCode',
-            title: '状态码',
+            title: t('proxyManagement.security.rateLimit.statusCode'),
             type: 'number',
             defaultValue: 429
           }
@@ -78,29 +79,29 @@ const SERVER_CONFIG_TEMPLATE: ConfigGroup[] = [
       },
       {
         id: 'ipFilter',
-        title: 'IP过滤',
+        title: t('proxyManagement.security.ipFilter.title'),
         type: 'object',
         fields: [
           {
             id: 'blacklist',
-            title: 'IP黑名单',
+            title: t('proxyManagement.security.ipFilter.blacklist'),
             type: 'array',
             children: [
               {
                 id: 'ip',
-                title: 'IP地址',
+                title: t('proxyManagement.security.ipFilter.ipAddress'),
                 type: 'text'
               }
             ]
           },
           {
             id: 'whitelist',
-            title: 'IP白名单',
+            title: t('proxyManagement.security.ipFilter.whitelist'),
             type: 'array',
             children: [
               {
                 id: 'ip',
-                title: 'IP地址',
+                title: t('proxyManagement.security.ipFilter.ipAddress'),
                 type: 'text'
               }
             ]
@@ -109,27 +110,27 @@ const SERVER_CONFIG_TEMPLATE: ConfigGroup[] = [
       },
       {
         id: 'csrf',
-        title: 'CSRF防护',
+        title: t('proxyManagement.security.csrf.title'),
         type: 'object',
         fields: [
           {
             id: 'enabled',
-            title: '启用',
+            title: t('common.enabled'),
             type: 'boolean'
           },
           {
             id: 'forced',
-            title: '强制检查所有请求',
+            title: t('proxyManagement.security.csrf.forced'),
             type: 'boolean'
           },
           {
             id: 'customPaths',
-            title: '自定义保护路径',
+            title: t('proxyManagement.security.csrf.customPaths'),
             type: 'array'
           },
           {
             id: 'excludePaths',
-            title: '排除路径',
+            title: t('proxyManagement.security.csrf.excludePaths'),
             type: 'array'
           }
         ]
@@ -138,26 +139,26 @@ const SERVER_CONFIG_TEMPLATE: ConfigGroup[] = [
   },
   {
     id: 'advanced',
-    title: '高级设置',
+    title: t('proxyManagement.serverConfig.groups.advanced'),
     fields: [
       {
         id: 'headers',
-        title: '自定义响应头',
+        title: t('proxyManagement.advanced.headers.title'),
         type: 'object',
         fields: [
           {
             id: 'add',
-            title: '添加头',
+            title: t('proxyManagement.advanced.headers.add'),
             type: 'keyValue'
           },
           {
             id: 'remove',
-            title: '移除头',
+            title: t('proxyManagement.advanced.headers.remove'),
             type: 'array',
             children: [
               {
                 id: 'key',
-                title: '头名称',
+                title: t('proxyManagement.advanced.headers.headerName'),
                 type: 'text'
               }
             ]
@@ -166,43 +167,43 @@ const SERVER_CONFIG_TEMPLATE: ConfigGroup[] = [
       },
       {
         id: 'healthCheck',
-        title: '健康检查',
+        title: t('proxyManagement.advanced.healthCheck.title'),
         type: 'object',
         fields: [
           {
             id: 'enabled',
-            title: '启用',
+            title: t('common.enabled'),
             type: 'boolean'
           },
           {
             id: 'type',
-            title: '检查类型',
+            title: t('proxyManagement.advanced.healthCheck.type'),
             type: 'select',
             options: [
-              { label: 'HTTP', value: 'http' },
-              { label: 'TCP', value: 'tcp' }
+              { label: t('proxyManagement.advanced.healthCheck.types.http'), value: 'http' },
+              { label: t('proxyManagement.advanced.healthCheck.types.tcp'), value: 'tcp' }
             ]
           },
           {
             id: 'interval',
-            title: '检查间隔(ms)',
+            title: t('proxyManagement.advanced.healthCheck.interval'),
             type: 'number'
           },
           {
             id: 'timeout',
-            title: '超时时间(ms)',
+            title: t('proxyManagement.advanced.healthCheck.timeout'),
             type: 'number'
           },
           {
             id: 'retries',
-            title: '重试次数',
+            title: t('proxyManagement.advanced.healthCheck.retries'),
             type: 'number'
           },
           {
             id: 'path',
-            title: '检查路径',
+            title: t('proxyManagement.advanced.healthCheck.path'),
             type: 'text',
-            description: '仅HTTP类型需要'
+            description: t('proxyManagement.advanced.healthCheck.pathDesc')
           }
         ]
       }
@@ -210,48 +211,48 @@ const SERVER_CONFIG_TEMPLATE: ConfigGroup[] = [
   },
   {
     id: 'locations',
-    title: '路径配置',
+    title: t('proxyManagement.serverConfig.groups.locations'),
     fields: [
       {
         id: 'locations',
-        title: '路径',
+        title: t('proxyManagement.locations.title'),
         type: 'array',
         children: [
           {
             id: 'path',
-            title: '路径',
+            title: t('proxyManagement.locations.path'),
             type: 'text',
             required: true,
             defaultValue: '/'
           },
           {
             id: 'upstream',
-            title: '上游服务器',
+            title: t('proxyManagement.locations.upstream'),
             type: 'select'
           },
           {
             id: 'proxy_pass',
-            title: '代理地址',
+            title: t('proxyManagement.locations.proxyPass'),
             type: 'text'
           },
           {
             id: 'root',
-            title: '根目录',
+            title: t('proxyManagement.locations.root'),
             type: 'text'
           },
           {
             id: 'return',
-            title: '返回值',
+            title: t('proxyManagement.locations.returnValue'),
             type: 'text'
           },
           {
             id: 'proxyTimeout',
-            title: '代理超时(ms)',
+            title: t('proxyManagement.locations.proxyTimeout'),
             type: 'number'
           },
           {
             id: 'proxyBuffering',
-            title: '代理缓冲',
+            title: t('proxyManagement.locations.proxyBuffering'),
             type: 'boolean'
           }
         ]
@@ -261,6 +262,7 @@ const SERVER_CONFIG_TEMPLATE: ConfigGroup[] = [
 ]
 
 export default function ProxyManagement() {
+  const { t } = useTranslation()
   const [config, setConfig] = useState<JsonConfig>()
   const [selectedServer, setSelectedServer] = useState<string>()
   const [loading, setLoading] = useState(true)
@@ -272,7 +274,7 @@ export default function ProxyManagement() {
       try {
         const response = await fetch('/api/config')
         if (!response.ok) {
-          throw new Error('Failed to load configuration')
+          throw new Error(t('proxyManagement.errors.loadConfig'))
         }
         const data = await response.json()
         if (data.error) {
@@ -282,14 +284,14 @@ export default function ProxyManagement() {
         setError(null)
       } catch (error) {
         console.error('Error loading config:', error)
-        setError(error instanceof Error ? error.message : 'Failed to load configuration')
+        setError(error instanceof Error ? error.message : t('proxyManagement.errors.loadConfig'))
       } finally {
         setLoading(false)
       }
     }
 
     loadConfig()
-  }, [])
+  }, [t])
 
   // 改进的渲染逻辑
   if (loading) {
@@ -303,12 +305,12 @@ export default function ProxyManagement() {
   if (error) {
     return (
       <div className="text-red-500 p-4 text-center">
-        <p>Error: {error}</p>
+        <p>{t('common.error')}: {error}</p>
         <button 
           onClick={() => window.location.reload()}
           className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
         >
-          重试
+          {t('common.retry')}
         </button>
       </div>
     )
@@ -345,7 +347,7 @@ export default function ProxyManagement() {
       })
 
       if (!response.ok) {
-        throw new Error('Failed to save configuration')
+        throw new Error(t('proxyManagement.errors.saveConfig'))
       }
     } catch (error) {
       console.error('Error saving configuration:', error)
@@ -388,18 +390,20 @@ export default function ProxyManagement() {
     }
   };
 
+  const SERVER_CONFIG_TEMPLATE = getServerConfigTemplate(t);
+
   return (
     <Card className="w-full">
       <CardHeader>
-        <CardTitle>代理服务器管理</CardTitle>
-        <CardDescription>管理您的代理服务器配置</CardDescription>
+        <CardTitle>{t('proxyManagement.title')}</CardTitle>
+        <CardDescription>{t('proxyManagement.description')}</CardDescription>
       </CardHeader>
       <CardContent>
         <Tabs defaultValue="servers">
           <TabsList>
-            <TabsTrigger value="servers">服务器配置</TabsTrigger>
-            <TabsTrigger value="upstreams">上游服务器</TabsTrigger>
-            <TabsTrigger value="general">通用配置</TabsTrigger>
+            <TabsTrigger value="servers">{t('proxyManagement.tabs.servers')}</TabsTrigger>
+            <TabsTrigger value="upstreams">{t('proxyManagement.tabs.upstreams')}</TabsTrigger>
+            <TabsTrigger value="general">{t('proxyManagement.tabs.general')}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="upstreams">

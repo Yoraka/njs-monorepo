@@ -1,4 +1,5 @@
 import { ServerConfig, ConfigGroup, UpstreamConfig } from '@/types/proxy-config';
+import { useTranslation } from 'react-i18next';
 import ConfigForm from '@/app/components/config-form';
 import ServerList from '@/app/components/server-list';
 import { useState, useEffect } from 'react';
@@ -26,6 +27,7 @@ export function ServerConfigPanel({
   onAddServer,
   configTemplate
 }: ServerConfigPanelProps) {
+  const { t } = useTranslation();
   const [localConfig, setLocalConfig] = useState<ServerConfig | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -126,7 +128,10 @@ export function ServerConfigPanel({
           <div className="space-y-4">
             <div className="flex justify-between items-center">
               <h3 className="text-lg font-medium">
-                {isCreating ? '新建服务器配置' : '编辑服务器配置'}
+                {isCreating 
+                  ? t('proxyManagement.serverConfig.newServer')
+                  : t('proxyManagement.serverConfig.editServer')
+                }
               </h3>
               <div className="space-x-2">
                 <Button 
@@ -134,13 +139,21 @@ export function ServerConfigPanel({
                   onClick={handleCancel}
                   disabled={!isDirty}
                 >
-                  取消{isCreating ? '新建' : '修改'}
+                  {t('common.cancel')}
+                  {isCreating 
+                    ? t('proxyManagement.serverConfig.creation')
+                    : t('proxyManagement.serverConfig.modification')
+                  }
                 </Button>
                 <Button 
                   onClick={handleSave}
                   disabled={!isDirty}
                 >
-                  {isCreating ? '创建' : '保存'}配置
+                  {isCreating 
+                    ? t('proxyManagement.serverConfig.create')
+                    : t('proxyManagement.serverConfig.save')
+                  }
+                  {t('proxyManagement.serverConfig.configuration')}
                 </Button>
               </div>
             </div>

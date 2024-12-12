@@ -1,4 +1,5 @@
 import { ServerConfig } from '@/types/proxy-config';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Plus } from 'lucide-react';
@@ -11,6 +12,8 @@ interface ServerListProps {
 }
 
 export default function ServerList({ servers, selectedServer, onSelect, onAddNew }: ServerListProps) {
+  const { t } = useTranslation();
+
   return (
     <div className="space-y-4">
       <ScrollArea className="h-[400px] rounded-md border">
@@ -34,7 +37,7 @@ export default function ServerList({ servers, selectedServer, onSelect, onAddNew
         onClick={onAddNew}
       >
         <Plus className="mr-2 h-4 w-4" />
-        添加新服务器
+        {t('proxyManagement.serverConfig.addNewServer')}
       </Button>
     </div>
   );

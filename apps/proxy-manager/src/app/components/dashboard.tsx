@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useTranslation } from 'react-i18next'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
@@ -95,38 +96,41 @@ const initialServers: Server[] = [
   },
 ]
 
-const ServerCard = ({ server }: { server: Server }) => (
-  <Card className="mb-4">
-    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-      <CardTitle className="text-sm font-medium">{server.name}</CardTitle>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="sm">
-            <MoreVertical className="h-4 w-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem>Edit</DropdownMenuItem>
-          <DropdownMenuItem>Disable</DropdownMenuItem>
-          <DropdownMenuItem className="text-red-600">Delete</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </CardHeader>
-    <CardContent>
-      <div className="flex flex-wrap gap-2">
-        {server.tags?.length ? (
-          server.tags.map((tag, index) => (
-            <Badge key={index} variant="secondary" className={`text-xs ${tag.css || ''}`}>
-              {tag.kind}: {tag.value}
-            </Badge>
-          ))
-        ) : (
-          <span className="text-sm text-muted-foreground">No tags available</span>
-        )}
-      </div>
-    </CardContent>
-  </Card>
-)
+const ServerCard = ({ server }: { server: Server }) => {
+  const { t } = useTranslation()
+  return (
+    <Card className="mb-4">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">{server.name}</CardTitle>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm">
+              <MoreVertical className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem>{t('common.edit')}</DropdownMenuItem>
+            <DropdownMenuItem>{t('common.disable')}</DropdownMenuItem>
+            <DropdownMenuItem className="text-red-600">{t('common.delete')}</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-wrap gap-2">
+          {server.tags?.length ? (
+            server.tags.map((tag, index) => (
+              <Badge key={index} variant="secondary" className={`text-xs ${tag.css || ''}`}>
+                {tag.kind}: {tag.value}
+              </Badge>
+            ))
+          ) : (
+            <span className="text-sm text-muted-foreground">{t('proxy.noTags')}</span>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
 
 // 添加格式化时间的辅助函数
 const formatChartTime = (timestamp: string, timeRange: string) => {
@@ -213,6 +217,7 @@ const formatBytes = (bytes: number, decimals: number = 2): string => {
 }
 
 export default function Dashboard() {
+  const { t } = useTranslation()
   const [isLoading, setIsLoading] = useState(true)  // 添加加载状态
   const [overviewData, setOverviewData] = useState<OverviewData>(() => {
     // 初始化时尝试从缓存获取数据
@@ -378,58 +383,56 @@ export default function Dashboard() {
   return (
     <div className="p-8 space-y-8">
       <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold">仪表盘</h1>
+        <h1 className="text-3xl font-bold">{t('menu.dashboard')}</h1>
         <Button onClick={handleRefresh} variant="outline">
-          刷新数据
+          {t('common.refresh')}
         </Button>
       </div>
       
       {/* Overview Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {isLoading ? (
-          // 加载动画
           <Card className="col-span-full flex items-center justify-center h-[150px]">
             <div className="flex flex-col items-center gap-2">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-              <div className="text-sm text-muted-foreground">加载数据中...</div>
+              <div className="text-sm text-muted-foreground">{t('common.loading')}</div>
             </div>
           </Card>
         ) : (
-          // 原有的卡片内容
           <>
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">代理配置总数</CardTitle>
+                <CardTitle className="text-sm font-medium">{t('proxy.totalConfigs')}</CardTitle>
                 <Shield className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{overviewData.totalProxies}</div>
                 <p className="text-xs text-muted-foreground">
-                  {overviewData.activeProxies} 活跃
+                  {overviewData.activeProxies} {t('proxy.active')}
                 </p>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">总流量</CardTitle>
+                <CardTitle className="text-sm font-medium">{t('proxy.totalTraffic')}</CardTitle>
                 <Activity className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{overviewData.totalTraffic}</div>
                 <p className="text-xs text-muted-foreground">
-                  刚刚更新
+                  {t('common.justUpdated')}
                 </p>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">活跃连接数</CardTitle>
+                <CardTitle className="text-sm font-medium">{t('proxy.activeConnections')}</CardTitle>
                 <Server className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{overviewData.totalConnections}</div>
                 <p className="text-xs text-muted-foreground">
-                  实时连接数
+                  {t('proxy.realTimeConnections')}
                 </p>
               </CardContent>
             </Card>
@@ -437,13 +440,13 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* Updated Proxy List */}
+      {/* Proxy List */}
       <Card className="w-full">
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>代理配置列表</CardTitle>
-              <CardDescription>管理你的反向代理配置</CardDescription>
+              <CardTitle>{t('proxy.configList')}</CardTitle>
+              <CardDescription>{t('proxy.configDescription')}</CardDescription>
             </div>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="icon">
@@ -451,7 +454,7 @@ export default function Dashboard() {
               </Button>
               <Button onClick={handleAddServer}>
                 <Plus className="h-4 w-4 mr-2" />
-                添加代理配置
+                {t('proxy.addConfig')}
               </Button>
             </div>
           </div>
@@ -459,7 +462,7 @@ export default function Dashboard() {
             <div className="relative flex-1">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="搜索代理配置..."
+                placeholder={t('proxy.searchPlaceholder')}
                 className="pl-8"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -476,23 +479,23 @@ export default function Dashboard() {
         </CardContent>
       </Card>
 
-      {/* 请求统计图表 */}
+      {/* Request Statistics Chart */}
       <Card className="col-span-2">
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>请求统计</CardTitle>
-              <CardDescription>历史请求和连接数据</CardDescription>
+              <CardTitle>{t('metrics.requestStats')}</CardTitle>
+              <CardDescription>{t('metrics.requestStatsDescription')}</CardDescription>
             </div>
             <Select value={timeRange} onValueChange={setTimeRange}>
               <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="选择时间范围" />
+                <SelectValue placeholder={t('metrics.selectTimeRange')} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="15m">最近15分钟</SelectItem>
-                <SelectItem value="1h">最近1小时</SelectItem>
-                <SelectItem value="6h">最近6小时</SelectItem>
-                <SelectItem value="24h">最近24小时</SelectItem>
+                <SelectItem value="15m">{t('metrics.last15Minutes')}</SelectItem>
+                <SelectItem value="1h">{t('metrics.lastHour')}</SelectItem>
+                <SelectItem value="6h">{t('metrics.last6Hours')}</SelectItem>
+                <SelectItem value="24h">{t('metrics.last24Hours')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -503,7 +506,7 @@ export default function Dashboard() {
               <div className="flex items-center justify-center h-full">
                 <div className="flex flex-col items-center gap-2">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                  <div className="text-sm text-muted-foreground">加载图表数据中...</div>
+                  <div className="text-sm text-muted-foreground">{t('common.loadingChart')}</div>
                 </div>
               </div>
             ) : (
@@ -529,7 +532,7 @@ export default function Dashboard() {
                     yAxisId="left"
                     orientation="left"
                     label={{ 
-                      value: 'Requests/s & Connections', 
+                      value: `${t('metrics.requestRate')} & ${t('metrics.activeConnections')}`, 
                       angle: -90, 
                       position: 'insideLeft',
                       offset: 0,
@@ -544,7 +547,7 @@ export default function Dashboard() {
                     orientation="right"
                     tickFormatter={(value) => formatBytes(Math.max(0, value))}
                     label={{ 
-                      value: 'Bandwidth', 
+                      value: t('metrics.bandwidth'), 
                       angle: 90, 
                       position: 'insideRight',
                       offset: 10,
@@ -560,13 +563,13 @@ export default function Dashboard() {
                       const positiveValue = Math.max(0, value)
                       switch (name) {
                         case "Requests/s":
-                          return [`${positiveValue.toFixed(2)} req/s`, "Request Rate"]
+                          return [`${positiveValue.toFixed(2)} req/s`, t('metrics.requestRate')]
                         case "Bandwidth In":
-                          return [formatBytes(positiveValue), "Inbound Traffic"]
+                          return [formatBytes(positiveValue), t('metrics.inboundTraffic')]
                         case "Bandwidth Out":
-                          return [formatBytes(positiveValue), "Outbound Traffic"]
+                          return [formatBytes(positiveValue), t('metrics.outboundTraffic')]
                         case "Connections":
-                          return [`${positiveValue} conns`, "Active Connections"]
+                          return [`${positiveValue} conns`, t('metrics.activeConnections')]
                         default:
                           return [positiveValue, name]
                       }
@@ -577,7 +580,7 @@ export default function Dashboard() {
                     type="monotone"
                     dataKey={(v) => Math.max(0, v.requestsPerSecond)}
                     stroke="#8884d8"
-                    name="Requests/s"
+                    name={t('metrics.requestRate')}
                     dot={false}
                     strokeWidth={2}
                     yAxisId="left"
@@ -587,7 +590,7 @@ export default function Dashboard() {
                     type="monotone"
                     dataKey={(v) => Math.max(0, v.bandwidthIn)}
                     stroke="#ffc658"
-                    name="Bandwidth In"
+                    name={t('metrics.inboundTraffic')}
                     dot={false}
                     strokeWidth={2}
                     yAxisId="right"
@@ -597,7 +600,7 @@ export default function Dashboard() {
                     type="monotone"
                     dataKey={(v) => Math.max(0, v.bandwidthOut)}
                     stroke="#ff7300"
-                    name="Bandwidth Out"
+                    name={t('metrics.outboundTraffic')}
                     dot={false}
                     strokeWidth={2}
                     yAxisId="right"
@@ -607,7 +610,7 @@ export default function Dashboard() {
                     type="monotone"
                     dataKey={(v) => Math.max(0, v.activeConnections)}
                     stroke="#82ca9d"
-                    name="Connections"
+                    name={t('metrics.activeConnections')}
                     dot={false}
                     strokeWidth={2}
                     yAxisId="left"
@@ -621,24 +624,24 @@ export default function Dashboard() {
         </CardContent>
       </Card>
 
-      {/* 系统状态卡片 */}
+      {/* System Status Card */}
       <Card>
         <CardHeader>
-          <CardTitle>System Status</CardTitle>
-          <CardDescription>Current resource usage</CardDescription>
+          <CardTitle>{t('metrics.systemStatus')}</CardTitle>
+          <CardDescription>{t('metrics.systemStatusDescription')}</CardDescription>
         </CardHeader>
         <CardContent>
           {isLoading ? (
             <div className="flex items-center justify-center h-[150px]">
               <div className="flex flex-col items-center gap-2">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                <div className="text-sm text-muted-foreground">Loading system status...</div>
+                <div className="text-sm text-muted-foreground">{t('common.loadingSystem')}</div>
               </div>
             </div>
           ) : (
             <div className="space-y-4">
               <div className="flex items-center">
-                <div className="w-40">CPU Usage:</div>
+                <div className="w-40">{t('metrics.cpuUsage')}:</div>
                 <div className="w-full bg-secondary rounded-full h-2.5">
                   <div
                     className="bg-primary h-2.5 rounded-full"
@@ -648,7 +651,7 @@ export default function Dashboard() {
                 <div className="w-16 text-right">{systemMetrics.cpuUsage}%</div>
               </div>
               <div className="flex items-center">
-                <div className="w-40">Memory Usage:</div>
+                <div className="w-40">{t('metrics.memoryUsage')}:</div>
                 <div className="w-full bg-secondary rounded-full h-2.5">
                   <div
                     className="bg-primary h-2.5 rounded-full"
@@ -658,7 +661,7 @@ export default function Dashboard() {
                 <div className="w-16 text-right">{systemMetrics.memoryPercentage}%</div>
               </div>
               <div className="flex items-center">
-                <div className="w-40">Disk Usage:</div>
+                <div className="w-40">{t('metrics.diskUsage')}:</div>
                 <div className="w-full bg-secondary rounded-full h-2.5">
                   <div
                     className="bg-primary h-2.5 rounded-full"

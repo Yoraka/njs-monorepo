@@ -26,12 +26,12 @@ export class Monitor extends EventEmitter {
     serverMetrics: {}
   };
 
-  private systemMetricsInterval: NodeJS.Timeout | null = null;
+  private systemMetricsInterval: NodeJS.Timeout | undefined = undefined;
   private currentSystemMetrics: SystemMetrics = {
     cpuUsage: 0,
     memoryUsage: 0,
     memoryPercentage: 0,
-    diskIO: 0
+    diskUsage: 0
   };
 
   constructor(config: Config, logger: Logger) {
@@ -137,7 +137,7 @@ export class Monitor extends EventEmitter {
     }
     if (this.systemMetricsInterval) {
       clearInterval(this.systemMetricsInterval);
-      this.systemMetricsInterval = null;
+      this.systemMetricsInterval = undefined;
     }
     this.logger.info('Monitoring stopped');
   }
@@ -146,16 +146,30 @@ export class Monitor extends EventEmitter {
    * 启动系统指标收集
    */
   private startSystemMetricsCollection(): void {
-    // 每秒更新一次系统指标
+    // 立即收集一次
+    this.updateSystemMetrics();
+    
+    // 设置定时收集
     this.systemMetricsInterval = setInterval(() => {
-      this.currentSystemMetrics = this.collectSystemMetrics();
+      this.updateSystemMetrics();
     }, 1000); // 1秒间隔
+  }
+
+  /**
+   * 更新系统指标
+   */
+  private async updateSystemMetrics(): Promise<void> {
+    try {
+      this.currentSystemMetrics = await collectSystemMetrics();
+    } catch (error) {
+      console.error('Error collecting system metrics:', error);
+    }
   }
 
   /**
    * 收集系统指标
    */
-  private collectSystemMetrics(): SystemMetrics {
+  private async collectSystemMetrics(): Promise<SystemMetrics> {
     return collectSystemMetrics();
   }
 

@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Trash2 } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { useTranslation } from 'react-i18next';
 
 interface UpstreamPanelProps {
   upstreams: UpstreamConfig[];
@@ -14,6 +15,7 @@ interface UpstreamPanelProps {
 }
 
 export function UpstreamPanel({ upstreams, onUpstreamChange }: UpstreamPanelProps) {
+  const { t } = useTranslation();
   const [editingUpstream, setEditingUpstream] = useState<UpstreamConfig | null>(null);
   const [isDirty, setIsDirty] = useState(false);
 
@@ -93,13 +95,13 @@ export function UpstreamPanel({ upstreams, onUpstreamChange }: UpstreamPanelProp
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <h2 className="text-lg font-semibold">上游服务器</h2>
+        <h2 className="text-lg font-semibold">{t('proxyManagement.upstream.title')}</h2>
         <Button onClick={() => setEditingUpstream({
           name: `upstream-${Date.now()}`,
           servers: [],
           balancer: 'round-robin'
         })}>
-          新建上游服务器
+          {t('proxyManagement.upstream.createNew')}
         </Button>
       </div>
 
@@ -108,7 +110,7 @@ export function UpstreamPanel({ upstreams, onUpstreamChange }: UpstreamPanelProp
           <CardHeader className="space-y-4">
             <div className="flex items-end gap-4">
               <div className="flex-1">
-                <Label htmlFor="upstream-name" className="mb-2">服务器组名称</Label>
+                <Label htmlFor="upstream-name" className="mb-2">{t('proxyManagement.upstream.groupName')}</Label>
                 <Input
                   id="upstream-name"
                   value={editingUpstream.name}
@@ -123,13 +125,13 @@ export function UpstreamPanel({ upstreams, onUpstreamChange }: UpstreamPanelProp
                   variant="outline" 
                   onClick={() => setEditingUpstream(null)}
                 >
-                  取消
+                  {t('common.cancel')}
                 </Button>
                 <Button 
                   onClick={handleSave}
                   disabled={!isDirty}
                 >
-                  保存
+                  {t('common.save')}
                 </Button>
               </div>
             </div>
@@ -138,7 +140,7 @@ export function UpstreamPanel({ upstreams, onUpstreamChange }: UpstreamPanelProp
             <div className="space-y-6">
               {/* 负载均衡策略 */}
               <div className="space-y-2">
-                <Label>负载均衡策略</Label>
+                <Label>{t('proxyManagement.upstream.balancer.title')}</Label>
                 <Select
                   value={editingUpstream.balancer}
                   onValueChange={(value) => {
@@ -150,9 +152,9 @@ export function UpstreamPanel({ upstreams, onUpstreamChange }: UpstreamPanelProp
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="round-robin">轮询</SelectItem>
-                    <SelectItem value="least-conn">最小连接数</SelectItem>
-                    <SelectItem value="ip-hash">IP哈希</SelectItem>
+                    <SelectItem value="round-robin">{t('proxyManagement.upstream.balancer.roundRobin')}</SelectItem>
+                    <SelectItem value="least-conn">{t('proxyManagement.upstream.balancer.leastConn')}</SelectItem>
+                    <SelectItem value="ip-hash">{t('proxyManagement.upstream.balancer.ipHash')}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -164,13 +166,13 @@ export function UpstreamPanel({ upstreams, onUpstreamChange }: UpstreamPanelProp
                     checked={editingUpstream.healthCheck?.enabled || false}
                     onCheckedChange={handleHealthCheckChange}
                   />
-                  <Label>启用健康检查</Label>
+                  <Label>{t('proxyManagement.upstream.healthCheck.enable')}</Label>
                 </div>
                 {editingUpstream.healthCheck?.enabled && (
                   <div className="space-y-4 mt-4">
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <Label>检查类型</Label>
+                        <Label>{t('proxyManagement.upstream.healthCheck.type')}</Label>
                         <Select
                           value={editingUpstream.healthCheck.type}
                           onValueChange={(value: 'http' | 'tcp') => {
@@ -187,7 +189,7 @@ export function UpstreamPanel({ upstreams, onUpstreamChange }: UpstreamPanelProp
                         </Select>
                       </div>
                       <div>
-                        <Label>检查间隔 (ms)</Label>
+                        <Label>{t('proxyManagement.upstream.healthCheck.interval')}</Label>
                         <Input
                           type="number"
                           value={editingUpstream.healthCheck.interval}
@@ -199,7 +201,7 @@ export function UpstreamPanel({ upstreams, onUpstreamChange }: UpstreamPanelProp
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <Label>超时时间 (ms)</Label>
+                        <Label>{t('proxyManagement.upstream.healthCheck.timeout')}</Label>
                         <Input
                           type="number"
                           value={editingUpstream.healthCheck.timeout}
@@ -209,7 +211,7 @@ export function UpstreamPanel({ upstreams, onUpstreamChange }: UpstreamPanelProp
                         />
                       </div>
                       <div>
-                        <Label>重试次数</Label>
+                        <Label>{t('proxyManagement.upstream.healthCheck.retries')}</Label>
                         <Input
                           type="number"
                           value={editingUpstream.healthCheck.retries}
@@ -221,7 +223,7 @@ export function UpstreamPanel({ upstreams, onUpstreamChange }: UpstreamPanelProp
                     </div>
                     {editingUpstream.healthCheck.type === 'http' && (
                       <div>
-                        <Label>检查路径</Label>
+                        <Label>{t('proxyManagement.upstream.healthCheck.path')}</Label>
                         <Input
                           value={editingUpstream.healthCheck.path}
                           onChange={e => {
@@ -238,13 +240,13 @@ export function UpstreamPanel({ upstreams, onUpstreamChange }: UpstreamPanelProp
               {/* 服务器列表 */}
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
-                  <Label>服务器列表</Label>
+                  <Label>{t('proxyManagement.upstream.serverList')}</Label>
                   <Button 
                     variant="outline" 
                     size="sm"
                     onClick={handleAddServer}
                   >
-                    添加服务器
+                    {t('proxyManagement.upstream.addServer')}
                   </Button>
                 </div>
                 {editingUpstream.servers.map((server, index) => (
@@ -252,7 +254,7 @@ export function UpstreamPanel({ upstreams, onUpstreamChange }: UpstreamPanelProp
                     <div className="space-y-4">
                       <div className="grid grid-cols-12 gap-4">
                         <div className="col-span-6">
-                          <Label>服务器地址</Label>
+                          <Label>{t('proxyManagement.upstream.serverUrl')}</Label>
                           <Input
                             placeholder="http://example.com:8080"
                             value={server.url}
@@ -260,7 +262,7 @@ export function UpstreamPanel({ upstreams, onUpstreamChange }: UpstreamPanelProp
                           />
                         </div>
                         <div className="col-span-2">
-                          <Label>权重</Label>
+                          <Label>{t('proxyManagement.upstream.weight')}</Label>
                           <Input
                             type="number"
                             placeholder="1-100"
@@ -275,14 +277,14 @@ export function UpstreamPanel({ upstreams, onUpstreamChange }: UpstreamPanelProp
                               checked={server.backup || false}
                               onCheckedChange={(checked) => handleServerChange(index, { backup: checked })}
                             />
-                            <Label>备用服务器</Label>
+                            <Label>{t('proxyManagement.upstream.backup')}</Label>
                           </div>
                           <div className="flex space-x-2">
                             <Switch
                               checked={server.down || false}
                               onCheckedChange={(checked) => handleServerChange(index, { down: checked })}
                             />
-                            <Label>暂停使用</Label>
+                            <Label>{t('proxyManagement.upstream.down')}</Label>
                           </div>
                         </div>
                         <div className="col-span-1 flex items-center justify-end">
@@ -314,15 +316,15 @@ export function UpstreamPanel({ upstreams, onUpstreamChange }: UpstreamPanelProp
             <div>
               <h3 className="font-medium">{upstream.name}</h3>
               <p className="text-sm text-gray-500">
-                {upstream.servers.length} 个服务器 · {upstream.balancer === 'round-robin' ? '轮询' : 
-                  upstream.balancer === 'least-conn' ? '最小连接数' : 'IP哈希'}
+                {upstream.servers.length} {t('proxyManagement.upstream.servers')} · {upstream.balancer === 'round-robin' ? t('proxyManagement.upstream.balancer.roundRobin') : 
+                  upstream.balancer === 'least-conn' ? t('proxyManagement.upstream.balancer.leastConn') : t('proxyManagement.upstream.balancer.ipHash')}
               </p>
             </div>
             <Button 
               variant="ghost" 
               onClick={() => setEditingUpstream(upstream)}
             >
-              编辑配置
+              {t('common.edit')}
             </Button>
           </CardHeader>
         </Card>

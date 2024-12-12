@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { format } from "date-fns"
 import { getMetricsManager } from '@/services/metrics-manager'
+import { useTranslation } from 'react-i18next'
 
 interface ServerMetrics {
   incomingTraffic: number
@@ -129,6 +130,7 @@ const generateInitialTimeAxis = (range: string) => {
 }
 
 export default function TrafficMonitor() {
+  const { t } = useTranslation()
   const [servers, setServers] = useState<Server[]>([])
   const [selectedServer, setSelectedServer] = useState<string>("")
   const [timeRange, setTimeRange] = useState<string>("1h")
@@ -260,21 +262,21 @@ export default function TrafficMonitor() {
   return (
     <Card className="col-span-3">
       <CardHeader>
-        <CardTitle>Traffic Monitor</CardTitle>
-        <CardDescription>Real-time traffic monitoring</CardDescription>
+        <CardTitle>{t('trafficMonitor.title')}</CardTitle>
+        <CardDescription>{t('trafficMonitor.description')}</CardDescription>
       </CardHeader>
       <CardContent>
         {isInitialLoading ? (
           <div className="flex justify-center items-center h-64">
             <div className="flex flex-col items-center gap-2">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-              <div className="text-sm text-muted-foreground">Loading servers...</div>
+              <div className="text-sm text-muted-foreground">{t('trafficMonitor.loadingServers')}</div>
             </div>
           </div>
         ) : error ? (
           <div className="text-center text-red-500 p-4">{error}</div>
         ) : servers.length === 0 ? (
-          <div className="text-center text-gray-500 p-4">No servers configured</div>
+          <div className="text-center text-gray-500 p-4">{t('trafficMonitor.noServersConfigured')}</div>
         ) : (
           <div className="space-y-4">
             <div className="flex gap-4">
@@ -299,23 +301,23 @@ export default function TrafficMonitor() {
                     ))
                   ) : (
                     <SelectItem value="" disabled>
-                      No servers available
+                      {t('trafficMonitor.noServersAvailable')}
                     </SelectItem>
                   )}
                 </SelectContent>
               </Select>
               <Select value={timeRange} onValueChange={setTimeRange}>
                 <SelectTrigger className="w-[150px]">
-                  <SelectValue placeholder="Time range" />
+                  <SelectValue placeholder={t('trafficMonitor.timeRange')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="15m">Last 15 minutes</SelectItem>
-                  <SelectItem value="30m">Last 30 minutes</SelectItem>
-                  <SelectItem value="1h">Last hour</SelectItem>
-                  <SelectItem value="3h">Last 3 hours</SelectItem>
-                  <SelectItem value="6h">Last 6 hours</SelectItem>
-                  <SelectItem value="12h">Last 12 hours</SelectItem>
-                  <SelectItem value="24h">Last 24 hours</SelectItem>
+                  <SelectItem value="15m">{t('trafficMonitor.last15Minutes')}</SelectItem>
+                  <SelectItem value="30m">{t('trafficMonitor.last30Minutes')}</SelectItem>
+                  <SelectItem value="1h">{t('trafficMonitor.lastHour')}</SelectItem>
+                  <SelectItem value="3h">{t('trafficMonitor.last3Hours')}</SelectItem>
+                  <SelectItem value="6h">{t('trafficMonitor.last6Hours')}</SelectItem>
+                  <SelectItem value="12h">{t('trafficMonitor.last12Hours')}</SelectItem>
+                  <SelectItem value="24h">{t('trafficMonitor.last24Hours')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -324,14 +326,14 @@ export default function TrafficMonitor() {
                 <Card className="col-span-full flex items-center justify-center h-[150px]">
                   <div className="flex flex-col items-center gap-2">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                    <div className="text-sm text-muted-foreground">Loading statistics...</div>
+                    <div className="text-sm text-muted-foreground">{t('trafficMonitor.loadingStatistics')}</div>
                   </div>
                 </Card>
               ) : (
                 <>
                   <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Requests/s</CardTitle>
+                      <CardTitle className="text-sm font-medium">{t('trafficMonitor.requestsPerSecond')}</CardTitle>
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-bold">{realtimeStats.requestsPerSecond}</div>
@@ -339,7 +341,7 @@ export default function TrafficMonitor() {
                   </Card>
                   <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Bandwidth In</CardTitle>
+                      <CardTitle className="text-sm font-medium">{t('trafficMonitor.bandwidthIn')}</CardTitle>
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-bold">{formatBandwidth(realtimeStats.bandwidthIn)}</div>
@@ -347,7 +349,7 @@ export default function TrafficMonitor() {
                   </Card>
                   <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Bandwidth Out</CardTitle>
+                      <CardTitle className="text-sm font-medium">{t('trafficMonitor.bandwidthOut')}</CardTitle>
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-bold">{formatBandwidth(realtimeStats.bandwidthOut)}</div>
@@ -355,7 +357,7 @@ export default function TrafficMonitor() {
                   </Card>
                   <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Active Connections</CardTitle>
+                      <CardTitle className="text-sm font-medium">{t('trafficMonitor.activeConnections')}</CardTitle>
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-bold">
@@ -368,14 +370,14 @@ export default function TrafficMonitor() {
             </div>
             <Card>
               <CardHeader>
-                <CardTitle>Traffic Trends</CardTitle>
+                <CardTitle>{t('trafficMonitor.trafficTrends')}</CardTitle>
               </CardHeader>
               <CardContent>
                 {isTrendLoading ? (
                   <div className="flex items-center justify-center h-[300px]">
                     <div className="flex flex-col items-center gap-2">
                       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                      <div className="text-sm text-muted-foreground">Loading trend data...</div>
+                      <div className="text-sm text-muted-foreground">{t('trafficMonitor.loadingTrendData')}</div>
                     </div>
                   </div>
                 ) : (
@@ -397,7 +399,7 @@ export default function TrafficMonitor() {
                         yAxisId="left"
                         orientation="left"
                         label={{ 
-                          value: 'Requests/s & Connections', 
+                          value: `${t('trafficMonitor.requestsPerSecond')} & ${t('trafficMonitor.activeConnections')}`, 
                           angle: -90, 
                           position: 'insideLeft',
                           style: { textAnchor: 'middle' }
@@ -410,7 +412,7 @@ export default function TrafficMonitor() {
                         orientation="right"
                         tickFormatter={(value) => formatBandwidth(Math.max(0, value))}
                         label={{ 
-                          value: 'Bandwidth', 
+                          value: t('trafficMonitor.bandwidth'), 
                           angle: 90, 
                           position: 'insideRight',
                           style: { textAnchor: 'middle' }
@@ -422,13 +424,13 @@ export default function TrafficMonitor() {
                         formatter={(value: number, name: string) => {
                           const positiveValue = Math.max(0, value)
                           switch (name) {
-                            case "Requests/s":
-                              return [`${positiveValue.toFixed(2)} req/s`, "Request Rate"]
-                            case "Bandwidth In":
-                              return [formatBandwidth(positiveValue), "Inbound Traffic"]
-                            case "Bandwidth Out":
-                              return [formatBandwidth(positiveValue), "Outbound Traffic"]
-                            case "Active Connections":
+                            case t('trafficMonitor.requestsPerSecond'):
+                              return [`${positiveValue.toFixed(2)} req/s`, t('trafficMonitor.requestRate')]
+                            case t('trafficMonitor.bandwidthIn'):
+                              return [formatBandwidth(positiveValue), t('trafficMonitor.inboundTraffic')]
+                            case t('trafficMonitor.bandwidthOut'):
+                              return [formatBandwidth(positiveValue), t('trafficMonitor.outboundTraffic')]
+                            case t('trafficMonitor.activeConnections'):
                               return [`${positiveValue} conns`, name]
                             default:
                               return [positiveValue, name]
@@ -441,7 +443,7 @@ export default function TrafficMonitor() {
                         type="monotone" 
                         dataKey={(v) => Math.max(0, v.requestsPerSecond)}
                         stroke="#8884d8" 
-                        name="Requests/s"
+                        name={t('trafficMonitor.requestsPerSecond')}
                         dot={false}
                         strokeWidth={2}
                         isAnimationActive={false}
@@ -452,7 +454,7 @@ export default function TrafficMonitor() {
                         type="monotone" 
                         dataKey={(v) => Math.max(0, v.bandwidthIn)}
                         stroke="#82ca9d" 
-                        name="Bandwidth In"
+                        name={t('trafficMonitor.bandwidthIn')}
                         dot={false}
                         strokeWidth={2}
                         isAnimationActive={false}
@@ -463,7 +465,7 @@ export default function TrafficMonitor() {
                         type="monotone" 
                         dataKey={(v) => Math.max(0, v.bandwidthOut)}
                         stroke="#ffc658" 
-                        name="Bandwidth Out"
+                        name={t('trafficMonitor.bandwidthOut')}
                         dot={false}
                         strokeWidth={2}
                         isAnimationActive={false}

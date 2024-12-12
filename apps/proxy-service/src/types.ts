@@ -162,7 +162,7 @@ export interface Config {
     cpuUsage: number;
     memoryUsage: number;
     memoryPercentage: number;
-    diskIO: number;
+    diskUsage: number;
   }
   
   /**
