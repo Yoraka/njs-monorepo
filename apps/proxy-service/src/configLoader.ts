@@ -1,8 +1,10 @@
-import { Config, HealthCheckConfig, ServerConfig } from './types';
+import { Config, HealthCheckConfig, ServerConfig, SSLConfig } from './types';
 import * as fs from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
 import { Logger } from 'winston';
+import * as crypto from 'crypto';
+import * as tls from 'tls';
 
 /**
  * 配置加载器类
@@ -70,6 +72,29 @@ export class ConfigLoader extends EventEmitter {
   };
 
   /**
+   * 默认SSL配置
+   */
+  private static readonly DEFAULT_SSL_CONFIG: SSLConfig = {
+    enabled: false,
+    cert: '',
+    key: '',
+    http2: false,
+    ciphers: [
+      'ECDHE-ECDSA-AES128-GCM-SHA256',
+      'ECDHE-RSA-AES128-GCM-SHA256',
+      'ECDHE-ECDSA-AES256-GCM-SHA384',
+      'ECDHE-RSA-AES256-GCM-SHA384'
+    ],
+    protocols: ['TLSv1.2', 'TLSv1.3'],
+    preferServerCiphers: true,
+    sessionTimeout: 3600,
+    sessionTickets: true,
+    ocspStapling: true,
+    sslRedirect: true,
+    sslRedirectStatusCode: 301
+  };
+
+  /**
    * 加载并验证配置文件
    * @returns 配置对象
    */
@@ -116,20 +141,10 @@ export class ConfigLoader extends EventEmitter {
     this.logger.debug('Merging user config:', JSON.stringify(userConfig, null, 2));
     this.logger.debug('Default config:', JSON.stringify(ConfigLoader.DEFAULT_CONFIG, null, 2));
 
-    const defaultSSLConfig = {
-      enabled: false,
-      key: '',
-      cert: '',
-      http2: false
-    };
-
     const mergedConfig = {
       upstreams: this.mergeUpstreamConfigs(userConfig.upstreams || ConfigLoader.DEFAULT_CONFIG.upstreams),
       servers: this.mergeServerConfigs(userConfig.servers || ConfigLoader.DEFAULT_CONFIG.servers),
-      ssl: userConfig.ssl ? {
-        ...defaultSSLConfig,
-        ...userConfig.ssl
-      } : undefined,
+      ssl: this.mergeSSLConfig(userConfig.ssl),
       logging: {
         ...ConfigLoader.DEFAULT_CONFIG.logging,
         ...userConfig.logging
@@ -282,11 +297,98 @@ export class ConfigLoader extends EventEmitter {
   }
 
   /**
-   * 验证配置对象的有效性
-   * @param config 配置对象
-   * @throws 如果配置无效
+   * 验证SSL配置
    */
-  private validateConfig(config: Config): void {
+  private async validateSSLConfig(ssl: SSLConfig): Promise<void> {
+    if (!ssl.enabled) {
+      return;
+    }
+
+    // 验证证书文件
+    if (!ssl.cert || !ssl.key) {
+      throw new Error('SSL enabled but certificate or key file not specified');
+    }
+
+    // 验证文件存在性
+    const certPath = path.resolve(ssl.cert);
+    const keyPath = path.resolve(ssl.key);
+
+    if (!fs.existsSync(certPath)) {
+      throw new Error(`SSL certificate file not found: ${certPath}`);
+    }
+
+    if (!fs.existsSync(keyPath)) {
+      throw new Error(`SSL key file not found: ${keyPath}`);
+    }
+
+    try {
+      // 验证证书和私钥是否匹配
+      const cert = fs.readFileSync(certPath, 'utf8');
+      const key = fs.readFileSync(keyPath, 'utf8');
+
+      const certPem = crypto.createPublicKey(cert);
+      const keyPem = crypto.createPrivateKey(key);
+
+      // 创建测试上下文验证配置
+      tls.createSecureContext({
+        cert: cert,
+        key: key,
+        ciphers: ssl.ciphers?.join(':'),
+        minVersion: ssl.protocols?.[0] as tls.SecureVersion,
+        maxVersion: ssl.protocols?.[ssl.protocols.length - 1] as tls.SecureVersion
+      });
+
+      this.logger.info('SSL configuration validated successfully');
+    } catch (error) {
+      throw new Error(`Invalid SSL configuration: ${(error as Error).message}`);
+    }
+
+    // 验证DH参数文件
+    if (ssl.dhparam) {
+      const dhparamPath = path.resolve(ssl.dhparam);
+      if (!fs.existsSync(dhparamPath)) {
+        throw new Error(`DH parameters file not found: ${dhparamPath}`);
+      }
+    }
+
+    // 验证客户端证书配置
+    if (ssl.clientCertificate?.enabled) {
+      if (!ssl.clientCertificate.path) {
+        throw new Error('Client certificate CA path not specified');
+      }
+      const caPath = path.resolve(ssl.clientCertificate.path);
+      if (!fs.existsSync(caPath)) {
+        throw new Error(`Client certificate CA file not found: ${caPath}`);
+      }
+    }
+  }
+
+  /**
+   * 合并SSL配置
+   */
+  private mergeSSLConfig(userSSL?: Partial<SSLConfig>): SSLConfig | undefined {
+    if (!userSSL) {
+      return undefined;
+    }
+  
+    return {
+      ...ConfigLoader.DEFAULT_SSL_CONFIG,
+      ...userSSL,
+      clientCertificate: userSSL.clientCertificate && {
+        ...{
+          enabled: false,
+          verify: 'optional',
+          path: ''
+        },
+        ...userSSL.clientCertificate
+      }
+    };
+  }
+
+  /**
+   * 验证配置对象的有效性
+   */
+  private async validateConfig(config: Config): Promise<void> {
     // 验证 upstreams
     if (!config.upstreams || !Array.isArray(config.upstreams) || config.upstreams.length === 0) {
       throw new Error('Config must contain at least one upstream');
@@ -360,6 +462,18 @@ export class ConfigLoader extends EventEmitter {
         }
       });
     });
+
+    // 验证SSL配置
+    if (config.ssl) {
+      await this.validateSSLConfig(config.ssl);
+    }
+
+    // 验证服务器SSL配置
+    for (const server of config.servers) {
+      if (server.ssl) {
+        await this.validateSSLConfig(server.ssl);
+      }
+    }
 
     // 添加日志输出，帮助调试
     this.logger.debug('Config validation passed. Available upstreams:', Array.from(upstreamNames));

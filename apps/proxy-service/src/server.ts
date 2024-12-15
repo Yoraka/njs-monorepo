@@ -4,7 +4,7 @@ import { Server } from 'http';
 import { Server as HTTPSServer } from 'https';
 import * as https from 'https';
 import * as http from 'http';
-import * as fs from 'fs';
+import * as http2 from 'http2';
 import { Config, ServerConfig, SSLConfig, LocationConfig, HeadersConfig } from './types';
 import { Logger } from 'winston';
 import { ProxyManager } from './proxyManager';
@@ -12,10 +12,15 @@ import { createIPFilter } from './ipFilter';
 import { createRateLimiter } from './rateLimiter';
 import { EventEmitter } from 'events';
 import { IncomingMessage } from 'http';
+import { HttpsServer } from './ssl/httpsServer';
+
+// 定义通用服务器类型
+type GenericServer = Server | HTTPSServer | http2.Http2Server | ReturnType<typeof http2.createSecureServer>;
 
 export class ProxyServer extends EventEmitter {
   private app: Express;
-  private server: Server | HTTPSServer | null = null;
+  private server: GenericServer | null = null;
+  private httpsServer: HttpsServer | null = null;
   private proxyManager: ProxyManager;
   private logger: Logger;
   private config: Config;
@@ -412,7 +417,7 @@ export class ProxyServer extends EventEmitter {
           }
         },
 
-        // 代理错误处理
+        // 统一错误处理
         error: (err: Error, req: IncomingMessage, res: any) => {
           try {
             const errorMessage = `Proxy error for ${req.url}: ${err.message}`;
@@ -421,51 +426,65 @@ export class ProxyServer extends EventEmitter {
             // 检查是否是 WebSocket 请求
             if ((req.headers['upgrade'] || '').toLowerCase() === 'websocket') {
               // WebSocket 错误处理
-              try {
-                if (res && typeof res.writeHead === 'function') {
-                  res.writeHead(502, {
-                    'Content-Type': 'text/plain'
-                  });
-                  res.end('WebSocket Proxy Error');
-                } else {
-                  // 如果无法写入响应，只记录错误但不抛出异常
-                  this.logger.error('Unable to send WebSocket error response');
-                }
-              } catch (writeError) {
-                // 捕获任何写入响应时的错误
-                this.logger.error('Error while sending WebSocket error response:', writeError);
+              if (res && res.socket && !res.socket.destroyed) {
+                res.socket.end();
               }
             } else {
               // HTTP 请求错误处理
-              try {
-                if (res && !res.headersSent) {
-                  // 尝试使用不同的响应方法
-                  if (typeof res.status === 'function') {
-                    // Express Response
-                    res.status(502).json({
-                      error: 'Bad Gateway',
-                      message: err.message
-                    });
-                  } else if (typeof res.writeHead === 'function') {
-                    // HTTP ServerResponse
-                    res.writeHead(502, {
-                      'Content-Type': 'application/json'
-                    });
-                    res.end(JSON.stringify({
-                      error: 'Bad Gateway',
-                      message: err.message
-                    }));
-                  }
+              if (res && !res.headersSent) {
+                if (typeof res.status === 'function') {
+                  // Express Response
+                  res.status(502).json({
+                    error: 'Bad Gateway',
+                    message: err.message
+                  });
+                } else if (typeof res.writeHead === 'function') {
+                  // HTTP ServerResponse
+                  res.writeHead(502, {
+                    'Content-Type': 'application/json'
+                  });
+                  res.end(JSON.stringify({
+                    error: 'Bad Gateway',
+                    message: err.message
+                  }));
                 }
-              } catch (writeError) {
-                // 捕获任何写入响应时的错误
-                this.logger.error('Error while sending HTTP error response:', writeError);
               }
             }
           } catch (handlerError) {
-            // 捕获错误处理器本身的任何错误
             this.logger.error('Error in proxy error handler:', handlerError);
           }
+        },
+
+        // WebSocket 相关事件处理
+        proxyReqWs: (proxyReq, req, socket, options, head) => {
+          this.logger.debug(`WebSocket proxy request started: ${req.url}`);
+          
+          // 添加自定义头部
+          if (location.headers?.add) {
+            Object.entries(location.headers.add).forEach(([key, value]) => {
+              proxyReq.setHeader(key, value);
+            });
+          }
+        },
+
+        open: (proxySocket) => {
+          this.logger.debug('WebSocket connection opened');
+          
+          // 监控代理Socket的数据传输
+          proxySocket.on('data', (data: Buffer) => {
+            if (this.config.monitoring?.enabled && this.proxyManager.monitor) {
+              this.proxyManager.monitor.updateRequestMetrics(
+                serverConfig.name,
+                0,           // incoming already counted
+                data.length  // outgoing
+              );
+              this.logger.debug(`WebSocket proxy data sent: ${data.length} bytes`);
+            }
+          });
+        },
+
+        close: (res, socket, proxyRes) => {
+          this.logger.debug('WebSocket connection closed');
         }
       },
     };
@@ -477,9 +496,9 @@ export class ProxyServer extends EventEmitter {
     const middlewareKey = `${serverConfig.name}:${location.path}`;
     this.proxyMiddlewares.set(middlewareKey, middleware);
 
-    // 如果启用了 WebSocket，设置升级处理
+    // 如果服务器已经存在，立即设置WebSocket升级处理
     if (this.server) {
-      this.server.on('upgrade', middleware.upgrade);
+      this.setupWebSocketHandlers(this.server);
     }
 
     return middleware;
@@ -557,61 +576,13 @@ export class ProxyServer extends EventEmitter {
       const port = this.config.servers[0].listen || 3000;
 
       if (this.config.ssl && this.config.ssl.enabled) {
-        this.server = await this.createHTTPSServer(port);
+        await this.startHttpsServer(port);
       } else {
         // 强制使用 IPv4
         this.server = this.app.listen(port, '0.0.0.0');
+        this.setupServerEvents(this.server);
       }
 
-      // 添加连接事件监听
-      if (this.server) {
-        // 监听新连接
-        this.server.on('connection', (socket) => {
-          const serverName = this.config.servers[0].name; // 获取当前服务器名称
-          
-          if (this.config.monitoring?.enabled && this.proxyManager.monitor) {
-            this.proxyManager.monitor.updateConnectionMetrics(serverName, 1);
-            this.logger.debug(`New TCP connection established for ${serverName}`);
-            
-            // 监听连接关闭
-            socket.on('close', () => {
-              if (this.proxyManager.monitor) {
-                this.proxyManager.monitor.updateConnectionMetrics(serverName, -1);
-                this.logger.debug(`TCP connection closed for ${serverName}`);
-              }
-            });
-          }
-        });
-
-        // 对于 HTTPS 连接也添加监听
-        if (this.config.ssl?.enabled) {
-          this.server.on('secureConnection', (socket) => {
-            const serverName = this.config.servers[0].name;
-            
-            if (this.config.monitoring?.enabled && this.proxyManager.monitor) {
-              this.proxyManager.monitor.updateConnectionMetrics(serverName, 1);
-              this.logger.debug(`New SSL/TLS connection established for ${serverName}`);
-              
-              socket.on('close', () => {
-                if (this.proxyManager.monitor) {
-                  this.proxyManager.monitor.updateConnectionMetrics(serverName, -1);
-                  this.logger.debug(`SSL/TLS connection closed for ${serverName}`);
-                }
-              });
-            }
-          });
-        }
-      }
-
-      this.server.on('listening', () => {
-        this.logger.info(`Server started on port ${port}`);
-        this.emit('serverStarted');
-      });
-
-      this.server.on('error', (error) => {
-        this.logger.error('Server error:', error);
-        this.emit('serverError', error);
-      });
     } catch (error) {
       this.logger.error('Failed to start server:', error);
       throw error;
@@ -619,17 +590,153 @@ export class ProxyServer extends EventEmitter {
   }
 
   /**
-   * 创建 HTTPS 服务器
+   * 启动HTTPS服务器
    */
-  private async createHTTPSServer(port: number): Promise<HTTPSServer> {
-    const sslConfig = this.config.ssl as SSLConfig;
-    const credentials = {
-      key: await fs.promises.readFile(sslConfig.key),
-      cert: await fs.promises.readFile(sslConfig.cert)
-    };
+  private async startHttpsServer(port: number): Promise<void> {
+    try {
+      // 创建HTTPS服务器实例
+      this.httpsServer = new HttpsServer(
+        {
+          ...this.config.servers[0],
+          ssl: this.config.ssl
+        },
+        this.logger
+      );
 
-    // 强制使用 IPv4
-    return https.createServer(credentials, this.app).listen(port, '0.0.0.0');
+      // 设置请求处理
+      const server = this.httpsServer.getServer();
+      if (server) {
+        server.on('request', this.app);
+        
+        // 重新绑定所有WebSocket升级处理器
+        this.setupWebSocketHandlers(server);
+      }
+
+      // 监听证书变更事件
+      this.httpsServer.on('error', (error) => {
+        this.logger.error('HTTPS server error:', error);
+        this.emit('serverError', error);
+      });
+
+      // 启动HTTPS服务器
+      await this.httpsServer.start();
+      
+      // 保存服务器引用
+      this.server = this.httpsServer.getServer();
+      
+      // 设置通用的服务器事件
+      if (this.server) {
+        this.setupServerEvents(this.server);
+      }
+
+    } catch (error) {
+      this.logger.error('Failed to start HTTPS server:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 设置WebSocket处理器
+   */
+  private setupWebSocketHandlers(server: GenericServer): void {
+    // 移除现有的upgrade监听器
+    server.removeAllListeners('upgrade');
+
+    // 重新绑定所有代理中间件的upgrade处理器
+    this.proxyMiddlewares.forEach((middleware, key) => {
+      if (typeof (middleware as any).upgrade === 'function') {
+        // 包装upgrade处理器以添加监控
+        const originalUpgrade = (middleware as any).upgrade;
+        (middleware as any).upgrade = (req: IncomingMessage, socket: any, head: any) => {
+          const serverName = this.config.servers[0].name;
+          
+          // 监控WebSocket连接
+          if (this.config.monitoring?.enabled && this.proxyManager.monitor) {
+            this.proxyManager.monitor.updateConnectionMetrics(serverName, 1);
+            this.logger.debug(`New WebSocket connection established for ${serverName}`);
+            
+            // 监听WebSocket连接关闭
+            socket.on('close', () => {
+              if (this.proxyManager.monitor) {
+                this.proxyManager.monitor.updateConnectionMetrics(serverName, -1);
+                this.logger.debug(`WebSocket connection closed for ${serverName}`);
+              }
+            });
+
+            // 监控WebSocket消息
+            socket.on('message', (data: Buffer) => {
+              if (this.proxyManager.monitor) {
+                this.proxyManager.monitor.updateRequestMetrics(
+                  serverName,
+                  data.length,  // incoming
+                  0            // outgoing will be counted in proxy response
+                );
+                this.logger.debug(`WebSocket message received for ${serverName}: ${data.length} bytes`);
+              }
+            });
+          }
+
+          // 调用原始的upgrade处理器
+          originalUpgrade.call(middleware, req, socket, head);
+        };
+
+        server.on('upgrade', (middleware as any).upgrade);
+        this.logger.debug(`Rebound WebSocket handler for ${key}`);
+      }
+    });
+  }
+
+  /**
+   * 设置服务器事件
+   */
+  private setupServerEvents(server: GenericServer): void {
+    // 监听新连接
+    server.on('connection', (socket) => {
+      const serverName = this.config.servers[0].name;
+      
+      if (this.config.monitoring?.enabled && this.proxyManager.monitor) {
+        this.proxyManager.monitor.updateConnectionMetrics(serverName, 1);
+        this.logger.debug(`New TCP connection established for ${serverName}`);
+        
+        socket.on('close', () => {
+          if (this.proxyManager.monitor) {
+            this.proxyManager.monitor.updateConnectionMetrics(serverName, -1);
+            this.logger.debug(`TCP connection closed for ${serverName}`);
+          }
+        });
+      }
+    });
+
+    // 对于 HTTPS 连接添加额外的监听
+    if (this.httpsServer && (server instanceof HTTPSServer || ('secureConnection' in server && typeof server.on === 'function'))) {
+      server.on('secureConnection', (socket) => {
+        const serverName = this.config.servers[0].name;
+        
+        if (this.config.monitoring?.enabled && this.proxyManager.monitor) {
+          this.proxyManager.monitor.updateConnectionMetrics(serverName, 1);
+          this.logger.debug(`New SSL/TLS connection established for ${serverName}`);
+          
+          socket.on('close', () => {
+            if (this.proxyManager.monitor) {
+              this.proxyManager.monitor.updateConnectionMetrics(serverName, -1);
+              this.logger.debug(`SSL/TLS connection closed for ${serverName}`);
+            }
+          });
+        }
+      });
+    }
+
+    server.on('listening', () => {
+      const addr = server.address();
+      const port = typeof addr === 'string' ? addr : addr?.port;
+      this.logger.info(`Server started on port ${port}`);
+      this.emit('serverStarted');
+    });
+
+    server.on('error', (error) => {
+      this.logger.error('Server error:', error);
+      this.emit('serverError', error);
+    });
   }
 
   /**
@@ -637,28 +744,16 @@ export class ProxyServer extends EventEmitter {
    */
   public async stop(): Promise<void> {
     try {
-      if (this.server) {
-        // 先停止接受新的连接
-        this.server.unref();
+      // 停止 HTTPS 服务器
+      if (this.httpsServer) {
+        await this.httpsServer.stop();
+        this.httpsServer = null;
+      }
 
-        // 关闭所有现有连接
-        const closeConnections = new Promise<void>((resolve, reject) => {
-          // 设置超时
-          const timeout = setTimeout(() => {
-            this.logger.warn('Force closing remaining connections');
-            this.server!.getConnections((err, count) => {
-              if (err) {
-                this.logger.error('Error getting connection count:', err);
-              } else {
-                this.logger.info(`Forcing close of ${count} connections`);
-              }
-            });
-            this.server!.closeAllConnections();
-            resolve();
-          }, 5000);
-
+      // 停止普通服务器
+      if (this.server && !this.httpsServer) {
+        await new Promise<void>((resolve, reject) => {
           this.server!.close((err) => {
-            clearTimeout(timeout);
             if (err) {
               reject(err);
             } else {
@@ -667,20 +762,18 @@ export class ProxyServer extends EventEmitter {
             }
           });
         });
-
-        await closeConnections;
-        
-        // 清理代理中间件
-        this.proxyMiddlewares.forEach(middleware => {
-          if (typeof (middleware as any).close === 'function') {
-            (middleware as any).close();
-          }
-        });
-        this.proxyMiddlewares.clear();
-
-        this.logger.info('Server stopped');
-        this.emit('serverStopped');
       }
+
+      // 清理代理中间件
+      this.proxyMiddlewares.forEach(middleware => {
+        if (typeof (middleware as any).close === 'function') {
+          (middleware as any).close();
+        }
+      });
+      this.proxyMiddlewares.clear();
+
+      this.logger.info('Server stopped');
+      this.emit('serverStopped');
     } catch (error) {
       this.logger.error('Error stopping server:', error);
       throw error;
@@ -691,11 +784,31 @@ export class ProxyServer extends EventEmitter {
    * 更新配置
    */
   public async updateConfig(newConfig: Config): Promise<void> {
+    // 保存新配置
     this.config = newConfig;
-    this.app._router = undefined; // 清除现有路由
-    this.setupMiddleware(); // 重新设置中间件和路由
-    this.logger.info('Server configuration updated');
-    this.emit('configUpdated', newConfig);
+
+    try {
+      // 停止现有服务器
+      await this.stop();
+
+      // 清除现有路由
+      this.app._router = undefined;
+
+      // 清除现有的代理中间件
+      this.proxyMiddlewares.clear();
+
+      // 重新设置中间件和路由
+      this.setupMiddleware();
+
+      // 重新启动服务器
+      await this.start();
+
+      this.logger.info('Server configuration updated');
+      this.emit('configUpdated', newConfig);
+    } catch (error) {
+      this.logger.error('Failed to update server configuration:', error);
+      throw error;
+    }
   }
 }
 

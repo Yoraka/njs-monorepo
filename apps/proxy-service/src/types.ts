@@ -32,6 +32,7 @@ export interface Config {
     rateLimit?: RateLimitConfig;
     ipFilter?: IPFilterConfig;
     csrf?: CSRFConfig;
+    ssl?: SSLConfig;
   }
   
   /**
@@ -83,6 +84,21 @@ export interface Config {
     key: string;
     cert: string;
     http2?: boolean;
+    ciphers?: string[];
+    protocols?: string[];
+    dhparam?: string;
+    preferServerCiphers?: boolean;
+    sessionTimeout?: number;
+    sessionTickets?: boolean;
+    ocspStapling?: boolean;
+    sslRedirect?: boolean;
+    sslRedirectStatusCode?: number;
+    trustedCertificates?: string[];
+    clientCertificate?: {
+      enabled: boolean;
+      verify: 'optional' | 'require';
+      path: string;
+    };
   }
   
   /**
