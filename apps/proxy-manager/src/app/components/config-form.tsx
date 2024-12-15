@@ -11,6 +11,7 @@ import { UpstreamPanel } from '@/app/components/upstream-panel';
 import { useTranslation } from 'react-i18next';
 import { SSLSettingsForm } from './ssl-settings-form';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { ConfigStatus } from '@/services/config-service';
 import { toast } from '@/hooks/use-toast';
 
 interface ConfigFormProps {
@@ -19,6 +20,16 @@ interface ConfigFormProps {
   upstreams?: UpstreamConfig[];
   onChange: (changes: Partial<ServerConfig>) => void;
   onUpstreamsChange: (upstreams: UpstreamConfig[]) => void;
+}
+
+interface UseWebSocketReturn {
+  isConnected: boolean;
+  error: Error | null;
+  configStatus: ConfigStatus;
+  updateConfig: (config: ServerConfig) => Promise<void>;
+  uploadFile: (file: File, type: 'cert' | 'key' | 'other') => Promise<void>;
+  subscribeToStatus: (callback: (status: ConfigStatus) => void) => () => void;
+  subscribeToErrors: (callback: (error: Error) => void) => () => void;
 }
 
 export default function ConfigForm({ 
@@ -38,7 +49,9 @@ export default function ConfigForm({
     configStatus,
     updateConfig,
     uploadFile,
-  } = useWebSocket();
+    subscribeToStatus,
+    subscribeToErrors,
+  } = useWebSocket() as UseWebSocketReturn;
 
   // 保存配置
   const handleSave = useCallback(async () => {
@@ -47,26 +60,9 @@ export default function ConfigForm({
     try {
       setIsSaving(true);
       
-      // 验证配置
-      const validationResult = await updateConfig(config);
+      // 更新配置
+      await updateConfig(config);
       
-      if (!validationResult.valid) {
-        toast({
-          title: t('proxy.validationError'),
-          description: validationResult.errors.join('\n'),
-          variant: 'destructive',
-        });
-        return;
-      }
-
-      if (validationResult.warnings.length > 0) {
-        toast({
-          title: t('proxy.warnings'),
-          description: validationResult.warnings.join('\n'),
-          variant: 'warning',
-        });
-      }
-
       toast({
         title: t('proxy.configSaved'),
         description: t('proxy.configSavedDesc'),
@@ -519,7 +515,7 @@ export default function ConfigForm({
       statusCode: 429
     };
 
-    // 获取当前的速率限制配置，确保所有必需���都有值
+    // 获取当前的速率限制配置，确保所有必需字段都有值
     const getCurrentRateLimit = (): RateLimitConfig => ({
       windowMs: config.rateLimit?.windowMs ?? defaultRateLimit.windowMs,
       max: config.rateLimit?.max ?? defaultRateLimit.max,

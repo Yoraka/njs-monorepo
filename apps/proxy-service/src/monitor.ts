@@ -70,23 +70,68 @@ export class Monitor extends EventEmitter {
 
     // 使用配置的 WebSocket 端口
     const wsPort = this.config.monitoring?.wsPort || 3001;
-    this.wss = new WebSocket.Server({ 
-      host: '0.0.0.0',
-      port: wsPort,
-      // 添加 CORS 支持
-      verifyClient: (info, cb) => {
-        const origin = info.origin || info.req.headers.origin;
-        const allowedOrigins = ['*'];
-        
-        if (!origin || allowedOrigins.includes(origin)) {
-          cb(true);
-        } else {
-          cb(false, 403, 'Origin not allowed');
-        }
-      }
-    });
     
-    this.logger.info(`WebSocket monitoring server started on port ${wsPort}`);
+    // 记录启动信息
+    this.logger.info('正在启动 WebSocket 服务器', {
+      port: wsPort,
+      nodeEnv: process.env.NODE_ENV,
+      platform: process.platform
+    });
+
+    try {
+      this.wss = new WebSocket.Server({ 
+        port: wsPort,
+        host: '0.0.0.0',  // 允许所有地址访问
+        perMessageDeflate: {
+          zlibDeflateOptions: {
+            chunkSize: 1024,
+            memLevel: 7,
+            level: 3
+          },
+          zlibInflateOptions: {
+            chunkSize: 10 * 1024
+          },
+          clientNoContextTakeover: true,
+          serverNoContextTakeover: true,
+          serverMaxWindowBits: 10,
+          concurrencyLimit: 10,
+          threshold: 1024
+        },
+        verifyClient: (info, cb) => {
+          const origin = info.origin || info.req.headers.origin;
+          const host = info.req.headers.host;
+          
+          this.logger.debug('WebSocket 连接验证', {
+            origin,
+            host,
+            headers: info.req.headers,
+            url: info.req.url
+          });
+          
+          // 允许所有连接
+          cb(true);
+        }
+      });
+      
+      // 添加服务器级别的错误处理
+      this.wss.on('error', (error) => {
+        this.logger.error('WebSocket 服务器错误:', {
+          error: error.message,
+          stack: error.stack
+        });
+      });
+
+      this.logger.info('WebSocket 服务器启动成功', {
+        port: wsPort,
+        address: this.wss.address()
+      });
+    } catch (error) {
+      this.logger.error('WebSocket 服务器启动失败:', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      throw error;
+    }
     
     // 初始化服务器指标和WebSocket服务器
     this.initializeServerMetrics();

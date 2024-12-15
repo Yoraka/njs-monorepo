@@ -241,6 +241,7 @@ export default function Dashboard() {
   const [trendData, setTrendData] = useState<TrendDataPoint[]>([])
   const [systemMetricsCache, setSystemMetricsCache] = useState<SystemMetrics | null>(null);
   const [systemMetricsError, setSystemMetricsError] = useState(0);
+  const [lastErrorTime, setLastErrorTime] = useState(0);
 
   // 获取概览数据
   const fetchOverviewData = async () => {
@@ -279,7 +280,7 @@ export default function Dashboard() {
   // 自动刷新
   useEffect(() => {
     fetchOverviewData()
-    const interval = setInterval(fetchOverviewData, 5000) // 每5秒刷新一次
+    const interval = setInterval(fetchOverviewData, 5000) // 每5秒刷新一���
     return () => clearInterval(interval)
   }, [])
 
@@ -327,43 +328,36 @@ export default function Dashboard() {
     const fetchSystemMetrics = async () => {
       try {
         const response = await fetch('/api/proxy-stats/system');
-        if (!response.ok) throw new Error('Failed to fetch system metrics');
+        
+        if (!response.ok) {
+          console.warn('System metrics API returned non-200 status');
+          return;
+        }
         
         const data = await response.json();
         
         // 验证数据有效性
         if (typeof data.cpuUsage === 'number' && !isNaN(data.cpuUsage)) {
           setSystemMetrics(data);
-          setSystemMetricsCache(data); // 缓存有效数据
-          setSystemMetricsError(0);
-        } else {
-          // 如果数据无效，使用缓存数据
-          console.warn('Invalid system metrics data:', data);
-          if (systemMetricsCache) {
-            setSystemMetrics(systemMetricsCache);
-          }
-          setSystemMetricsError(prev => prev + 1);
+          setSystemMetricsCache(data);
         }
       } catch (error) {
-        console.error('Failed to fetch system metrics:', error);
+        console.warn('Failed to fetch system metrics:', error);
         // 发生错误时使用缓存数据
         if (systemMetricsCache) {
           setSystemMetrics(systemMetricsCache);
         }
-        setSystemMetricsError(prev => prev + 1);
       }
     };
 
+    // 初始加载
     fetchSystemMetrics();
     
-    // 根据错误次数动态调整更新间隔
-    const interval = setInterval(
-      fetchSystemMetrics, 
-      systemMetricsError > 3 ? 10000 : 5000
-    );
+    // 固定5秒的刷新间隔
+    const interval = setInterval(fetchSystemMetrics, 5000);
     
     return () => clearInterval(interval);
-  }, [systemMetricsError]); // 添加 systemMetricsError 作为依赖
+  }, []); // 移除所有依赖项
 
   // 获取趋势数据
   useEffect(() => {
@@ -656,7 +650,9 @@ export default function Dashboard() {
       <Card>
         <CardHeader>
           <CardTitle>{t('metrics.systemStatus')}</CardTitle>
-          <CardDescription>{t('metrics.systemStatusDescription')}</CardDescription>
+          <CardDescription>
+            {t('metrics.systemStatusDescription')}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {isLoading ? (
