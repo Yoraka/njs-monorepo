@@ -35,6 +35,7 @@ export interface ServerConfig {
     rateLimit?: RateLimitConfig;
     ipFilter?: IPFilterConfig;
     csrf?: CSRFConfig;
+    ssl?: SSLConfig;
 }
 
 /**
@@ -119,9 +120,15 @@ export interface IPFilterConfig {
  */
 export interface SSLConfig {
     enabled: boolean;
-    key: string;
     cert: string;
-    http2?: boolean;
+    key: string;
+    http2: boolean;
+    protocols: string[];
+    sslRedirect: boolean;
+    clientCertificate: {
+        enabled: boolean;
+        verify: 'optional' | 'require';
+    };
 }
 
 /**

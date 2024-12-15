@@ -9,6 +9,7 @@ import { Trash2, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { UpstreamPanel } from '@/app/components/upstream-panel';
 import { useTranslation } from 'react-i18next';
+import SSLSettingsForm from './ssl-settings-form';
 
 interface ConfigFormProps {
   config?: ServerConfig;
@@ -1291,6 +1292,17 @@ export default function ConfigForm({
         <h3 className="text-lg font-medium">{t('proxy.advancedSettings')}</h3>
         <Card className="p-6">
           <AdvancedSettingsForm config={config} onChange={onChange} />
+        </Card>
+      </div>
+
+      {/* SSL设置面板 */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-medium">{t('proxy.sslSettings')}</h3>
+        <Card className="p-6">
+          <SSLSettingsForm
+            config={config}
+            onChange={onChange}
+          />
         </Card>
       </div>
     </div>
