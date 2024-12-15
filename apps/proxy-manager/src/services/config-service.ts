@@ -1,9 +1,16 @@
 import { ServerConfig, ValidationResult } from '@/types/proxy-config';
 import { getWebSocketClient } from './ws-client';
 
-export interface ConfigStatus {
+export enum ConfigStatus {
+  SAVED = 'SAVED',
+  SAVING = 'SAVING',
+  ERROR = 'ERROR',
+  MODIFIED = 'MODIFIED'
+}
+
+export interface ConfigStatusInfo {
   lastUpdate: number;
-  status: 'idle' | 'updating' | 'error';
+  status: ConfigStatus;
   error?: string;
 }
 
@@ -16,21 +23,21 @@ export interface ServiceStatus {
 
 export class ConfigService {
   private wsClient = getWebSocketClient();
-  private configStatus: ConfigStatus = {
+  private configStatus: ConfigStatusInfo = {
     lastUpdate: 0,
-    status: 'idle'
+    status: ConfigStatus.SAVED
   };
 
   // 配置管理
   public async updateConfig(config: ServerConfig): Promise<void> {
     try {
-      this.configStatus.status = 'updating';
+      this.configStatus.status = ConfigStatus.SAVING;
       await this.wsClient.sendConfigUpdate(config);
       this.configStatus.lastUpdate = Date.now();
-      this.configStatus.status = 'idle';
+      this.configStatus.status = ConfigStatus.SAVED;
       this.configStatus.error = undefined;
     } catch (error) {
-      this.configStatus.status = 'error';
+      this.configStatus.status = ConfigStatus.ERROR;
       this.configStatus.error = error instanceof Error ? error.message : 'Unknown error';
       throw error;
     }
@@ -73,7 +80,7 @@ export class ConfigService {
   }
 
   // 状态查询
-  public getConfigStatus(): ConfigStatus {
+  public getConfigStatus(): ConfigStatusInfo {
     return { ...this.configStatus };
   }
 

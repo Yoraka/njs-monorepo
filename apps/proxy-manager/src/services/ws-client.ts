@@ -11,7 +11,7 @@ interface PendingMessage {
 }
 
 export class WebSocketClient extends EventEmitter {
-  private static instance: WebSocketClient | null = null
+  public static instance: WebSocketClient | null = null
   public ws: WebSocket | null = null
   private url: string
   private reconnectAttempts = 0
@@ -23,7 +23,7 @@ export class WebSocketClient extends EventEmitter {
   private connectionState: 'connecting' | 'connected' | 'disconnected' | 'failed' = 'disconnected'
   private messageQueue: Array<PendingMessage> = [];
   private messageTimeout = 30000; // 30秒超时
-  private static lastUrl: string | null = null;
+  public static lastUrl: string | null = null;
 
   private constructor(url: string) {
     super()
@@ -522,13 +522,15 @@ export function getWebSocketClient(): WebSocketClient {
   const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 
                 `${wsProtocol}//${hostname}:3001`;
   
-  console.log('Debug - 初始化 WebSocket 客户端:', {
-    wsUrl,
-    env: process.env.NEXT_PUBLIC_WS_URL,
-    hostname,
-    protocol: wsProtocol,
-    userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'unknown'
-  });
+  if (!WebSocketClient.instance || WebSocketClient.lastUrl !== wsUrl) {
+    console.log('Debug - 初始化 WebSocket 客户端:', {
+      wsUrl,
+      env: process.env.NEXT_PUBLIC_WS_URL,
+      hostname,
+      protocol: wsProtocol,
+      userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'unknown'
+    });
+  }
   
   return WebSocketClient.getInstance(wsUrl);
 }

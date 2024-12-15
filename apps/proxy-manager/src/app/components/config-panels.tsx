@@ -5,6 +5,7 @@ import ServerList from '@/app/components/server-list';
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Plus } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface ServerConfigPanelProps {
   servers: ServerConfig[];
@@ -15,6 +16,7 @@ interface ServerConfigPanelProps {
   onUpstreamsChange: (upstreams: UpstreamConfig[]) => void;
   onAddServer: (server: ServerConfig) => void;
   configTemplate: ConfigGroup[];
+  isConnected: boolean;
 }
 
 export function ServerConfigPanel({
@@ -25,7 +27,8 @@ export function ServerConfigPanel({
   onServerChange,
   onUpstreamsChange,
   onAddServer,
-  configTemplate
+  configTemplate,
+  isConnected
 }: ServerConfigPanelProps) {
   const { t } = useTranslation();
   const [localConfig, setLocalConfig] = useState<ServerConfig | null>(null);
@@ -127,12 +130,23 @@ export function ServerConfigPanel({
         {(localConfig || isCreating) && (
           <div className="space-y-4">
             <div className="flex justify-between items-center">
-              <h3 className="text-lg font-medium">
-                {isCreating 
-                  ? t('proxyManagement.serverConfig.newServer')
-                  : t('proxyManagement.serverConfig.editServer')
-                }
-              </h3>
+              <div className="flex items-center gap-4">
+                <h3 className="text-lg font-medium">
+                  {isCreating 
+                    ? t('proxyManagement.serverConfig.newServer')
+                    : t('proxyManagement.serverConfig.editServer')
+                  }
+                </h3>
+                <div className={cn(
+                  "flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium",
+                  isConnected ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+                )}>
+                  <div className={cn(
+                    "w-2 h-2 rounded-full animate-pulse",
+                    isConnected ? "bg-emerald-500" : "bg-red-500"
+                  )} />
+                </div>
+              </div>
               <div className="space-x-2">
                 <Button 
                   variant="outline" 

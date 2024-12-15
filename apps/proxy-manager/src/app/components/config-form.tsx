@@ -5,7 +5,7 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Trash2, X } from 'lucide-react';
+import { Trash2, X, Plus, Settings2, Shield, Route } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { UpstreamPanel } from '@/app/components/upstream-panel';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +13,7 @@ import { SSLSettingsForm } from './ssl-settings-form';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { ConfigStatus } from '@/services/config-service';
 import { toast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
 
 interface ConfigFormProps {
   config?: ServerConfig;
@@ -32,6 +33,14 @@ interface UseWebSocketReturn {
   subscribeToErrors: (callback: (error: Error) => void) => () => void;
 }
 
+// 修改状态映射
+const CONFIG_STATUS_MAP: Record<ConfigStatus, string> = {
+  [ConfigStatus.SAVED]: 'proxy.statusSaved',
+  [ConfigStatus.SAVING]: 'proxy.statusSaving',
+  [ConfigStatus.ERROR]: 'proxy.statusError',
+  [ConfigStatus.MODIFIED]: 'proxy.statusModified'
+};
+
 export default function ConfigForm({ 
   config, 
   template, 
@@ -41,44 +50,11 @@ export default function ConfigForm({
 }: ConfigFormProps) {
   const { t } = useTranslation();
   const [showUpstreamPanel, setShowUpstreamPanel] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
   
   const {
-    isConnected,
-    error,
-    configStatus,
-    updateConfig,
     uploadFile,
-    subscribeToStatus,
-    subscribeToErrors,
   } = useWebSocket() as UseWebSocketReturn;
-
-  // 保存配置
-  const handleSave = useCallback(async () => {
-    if (!config) return;
-
-    try {
-      setIsSaving(true);
-      
-      // 更新配置
-      await updateConfig(config);
-      
-      toast({
-        title: t('proxy.configSaved'),
-        description: t('proxy.configSavedDesc'),
-      });
-
-    } catch (err) {
-      const error = err as Error;
-      toast({
-        title: t('proxy.saveError'),
-        description: error.message,
-        variant: 'destructive',
-      });
-    } finally {
-      setIsSaving(false);
-    }
-  }, [config, updateConfig, t]);
 
   // 处理文件上传
   const handleFileUpload = useCallback(async (file: File, type: 'cert' | 'key' | 'other') => {
@@ -159,29 +135,41 @@ export default function ConfigForm({
       return (
         <div className="space-y-4">
           {values?.map((location, index) => (
-            <Card key={index} className="p-4">
-              <div className="flex justify-between items-start mb-4">
-                <span className="text-sm font-medium">{t('proxy.pathConfig')} {index + 1}</span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleRemove(index)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+            <div key={index} className="group relative">
+              <div className="absolute -left-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-gray-50 text-sm font-medium text-gray-600 ring-1 ring-inset ring-gray-200">
+                {index + 1}
               </div>
-              <LocationConfigForm
-                location={location}
-                upstreams={upstreams || []}
-                onChange={(changes) => handleItemChange(index, changes)}
-              />
-            </Card>
+              <div className="rounded-lg border border-gray-200 bg-white shadow-sm transition-shadow hover:shadow-md">
+                <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+                  <h4 className="text-sm font-medium text-gray-700">
+                    {t('proxy.pathConfig')} {index + 1}
+                  </h4>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-gray-400 hover:text-gray-600"
+                    onClick={() => handleRemove(index)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="p-4">
+                  <LocationConfigForm
+                    location={location}
+                    upstreams={upstreams || []}
+                    onChange={(changes) => handleItemChange(index, changes)}
+                  />
+                </div>
+              </div>
+            </div>
           ))}
           <Button
             variant="outline"
             size="sm"
+            className="w-full"
             onClick={handleAdd}
           >
+            <Plus className="mr-2 h-4 w-4" />
             {t('proxy.addPathConfig')}
           </Button>
         </div>
@@ -191,21 +179,27 @@ export default function ConfigForm({
     return (
       <div className="space-y-4">
         {values?.map((value, index) => (
-          <Card key={index} className="p-4">
-            <div className="flex justify-between items-start mb-4">
-              <span className="text-sm font-medium">{t('common.item')} {index + 1}</span>
+          <Card key={index} className="relative group">
+            <div className="absolute -left-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-gray-50 text-sm font-medium text-gray-600 ring-1 ring-inset ring-gray-200">
+              {index + 1}
+            </div>
+            <div className="flex justify-between items-center border-b border-gray-100 px-4 py-3">
+              <span className="text-sm font-medium text-gray-700">{t('common.item')} {index + 1}</span>
               <Button
                 variant="ghost"
                 size="icon"
+                className="h-8 w-8 text-gray-400 hover:text-gray-600"
                 onClick={() => handleRemove(index)}
               >
                 <Trash2 className="h-4 w-4" />
               </Button>
             </div>
-            <div className="grid gap-4">
+            <div className="p-4 grid gap-4">
               {field.children?.map(childField => (
                 <div key={childField.id} className="grid grid-cols-4 items-center gap-4">
-                  <Label className="text-right">{t(`proxy.fields.${childField.id}`)}</Label>
+                  <Label className="text-right text-sm font-medium text-gray-500">
+                    {t(`proxy.fields.${childField.id}`)}
+                  </Label>
                   <div className="col-span-3">
                     {childField.id === 'upstream' ? (
                       <Select
@@ -239,8 +233,10 @@ export default function ConfigForm({
         <Button
           variant="outline"
           size="sm"
+          className="w-full"
           onClick={handleAdd}
         >
+          <Plus className="mr-2 h-4 w-4" />
           {t('common.add')} {field.title}
         </Button>
       </div>
@@ -278,7 +274,26 @@ export default function ConfigForm({
         return (
           <Switch
             checked={value || field.defaultValue || false}
-            onCheckedChange={(checked) => onFieldChange(checked)}
+            onCheckedChange={(checked) => {
+              if (field.id === 'ssl') {
+                onChange({
+                  ssl: checked ? {
+                    enabled: true,
+                    cert: '',
+                    key: '',
+                    http2: false,
+                    protocols: ['TLSv1.2', 'TLSv1.3'],
+                    sslRedirect: true,
+                    clientCertificate: {
+                      enabled: false,
+                      verify: 'optional' as const
+                    }
+                  } : undefined
+                });
+              } else {
+                onFieldChange(checked);
+              }
+            }}
             className={hasError ? 'border-red-500' : ''}
           />
         );
@@ -371,17 +386,25 @@ export default function ConfigForm({
 
     return (
       <div className="space-y-4">
-        <div className="grid grid-cols-4 gap-4">
-          <div className="col-span-1">
-            <Label>{t('proxy.path')}</Label>
+        <div className="grid grid-cols-12 gap-4">
+          {/* 路径输入框 */}
+          <div className="col-span-4">
+            <Label className="text-sm font-medium text-gray-500 mb-1.5 block">
+              {t('proxy.path')}
+            </Label>
             <Input
               value={location.path || '/'}
               onChange={e => onChange({ path: e.target.value })}
               placeholder="/api/*"
+              className="w-full"
             />
           </div>
-          <div className="col-span-3">
-            <Label>{t('proxy.proxyType')}</Label>
+
+          {/* 代理类型选择器 */}
+          <div className="col-span-8">
+            <Label className="text-sm font-medium text-gray-500 mb-1.5 block">
+              {t('proxy.proxyType')}
+            </Label>
             <Select
               value={proxyType}
               onValueChange={handleProxyTypeChange}
@@ -402,15 +425,20 @@ export default function ConfigForm({
           </div>
         </div>
 
+        {/* 上游服务器设置 */}
         {proxyType === 'upstream' && (
-          <div className="space-y-2">
+          <div className="space-y-3 pt-3 border-t border-gray-100">
             <div className="flex justify-between items-center">
-              <Label>{t('proxy.selectUpstream')}</Label>
+              <Label className="text-sm font-medium text-gray-500">
+                {t('proxy.selectUpstream')}
+              </Label>
               <Button
                 variant="ghost"
                 size="sm"
+                className="text-primary hover:text-primary/80"
                 onClick={() => setShowUpstreamPanel(true)}
               >
+                <Plus className="mr-2 h-4 w-4" />
                 {t('proxy.newUpstream')}
               </Button>
             </div>
@@ -418,7 +446,7 @@ export default function ConfigForm({
               value={location.upstream}
               onValueChange={value => onChange({ upstream: value })}
             >
-              <SelectTrigger>
+              <SelectTrigger className="w-full">
                 <SelectValue placeholder={t('proxy.selectUpstream')} />
               </SelectTrigger>
               <SelectContent>
@@ -432,33 +460,44 @@ export default function ConfigForm({
           </div>
         )}
 
+        {/* 代理地址设置 */}
         {proxyType === 'proxy_pass' && (
-          <div>
-            <Label>{t('proxy.proxyAddress')}</Label>
+          <div className="space-y-3 pt-3 border-t border-gray-100">
+            <Label className="text-sm font-medium text-gray-500">
+              {t('proxy.proxyAddress')}
+            </Label>
             <Input
               value={location.proxy_pass || ''}
               onChange={e => onChange({ proxy_pass: e.target.value })}
               placeholder="http://backend-service:8080"
+              className="w-full"
             />
           </div>
         )}
 
+        {/* 静态文件设置 */}
         {proxyType === 'static' && (
-          <div className="space-y-4">
+          <div className="space-y-4 pt-3 border-t border-gray-100">
             <div>
-              <Label>{t('proxy.staticFileRoot')}</Label>
+              <Label className="text-sm font-medium text-gray-500 mb-1.5 block">
+                {t('proxy.staticFileRoot')}
+              </Label>
               <Input
                 value={location.root || ''}
                 onChange={e => onChange({ root: e.target.value })}
                 placeholder="/var/www/html"
+                className="w-full"
               />
             </div>
             <div>
-              <Label>{t('proxy.directReturn')}</Label>
+              <Label className="text-sm font-medium text-gray-500 mb-1.5 block">
+                {t('proxy.directReturn')}
+              </Label>
               <Input
                 value={location.return || ''}
                 onChange={e => onChange({ return: e.target.value })}
                 placeholder="200 OK"
+                className="w-full"
               />
             </div>
           </div>
@@ -568,7 +607,7 @@ export default function ConfigForm({
         )}
 
         {isCustomSecurityEnabled && (
-          <div className="space-y-6">
+          <div className="space-y-4">
             {/* 速率限制设置 */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
@@ -1033,7 +1072,7 @@ export default function ConfigForm({
       onError: () => {},
     };
 
-    // 获取当前配置，保持所有字段的完整性
+    // 获取当前配置，保持所有段的完整性
     const getCurrentHealthCheck = (): Required<HealthCheckConfig> => ({
       ...defaultHealthCheck,  // 先用默认值填充所有字段
       // 只覆盖 UI 中显示的字段
@@ -1060,7 +1099,7 @@ export default function ConfigForm({
         )}
 
         {isCustomAdvancedEnabled && (
-          <div className="space-y-6">
+          <div className="space-y-4">
             {/* 自定义响应头 */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
@@ -1285,22 +1324,7 @@ export default function ConfigForm({
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold">{t('proxy.configTitle')}</h2>
-        <div className="flex items-center gap-4">
-          {!isConnected && (
-            <p className="text-sm text-red-500">{t('proxy.notConnected')}</p>
-          )}
-          <Button 
-            onClick={handleSave}
-            disabled={!isConnected || isSaving}
-          >
-            {isSaving ? t('proxy.saving') : t('proxy.save')}
-          </Button>
-        </div>
-      </div>
-
+    <div className="space-y-4">
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-md p-4">
           <p className="text-sm text-red-600">{error.message}</p>
@@ -1342,23 +1366,77 @@ export default function ConfigForm({
           return null;
         }
         
+        // 基础设置
+        if (group.id === 'basic') {
+          return (
+            <>
+              <div key={group.id} className="space-y-4">
+                <div className="flex items-center gap-2 pb-2 border-b">
+                  <Settings2 className="h-5 w-5 text-gray-500" />
+                  <h3 className="text-base font-medium">{t('proxyManagement.serverConfig.groups.basic')}</h3>
+                </div>
+                <Card className="p-6">
+                  <div className="grid gap-6">
+                    {group.fields.map((field) => (
+                      <div key={field.id} className="grid grid-cols-12 items-center gap-4">
+                        <Label className="col-span-3 text-sm font-medium text-gray-500 text-right">
+                          {field.title}
+                          {field.required && <span className="text-red-500 ml-1">*</span>}
+                        </Label>
+                        <div className="col-span-9">
+                          {isArrayField(field, getFieldValue(field, config))
+                            ? renderArrayField(field, getFieldValue(field, config) as any[])
+                            : renderField(field, getFieldValue(field, config))}
+                          {field.description && (
+                            <p className="text-sm text-gray-500 mt-1.5">{field.description}</p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              </div>
+
+              {/* SSL设置面板 */}
+              {config.ssl?.enabled && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 pb-2 border-b">
+                    <Shield className="h-5 w-5 text-gray-500" />
+                    <h3 className="text-base font-medium">{t('proxy.sslSettings')}</h3>
+                  </div>
+                  <Card className="p-6">
+                    <SSLSettingsForm
+                      config={config}
+                      onChange={onChange}
+                    />
+                  </Card>
+                </div>
+              )}
+            </>
+          );
+        }
+        
+        // 路径配置
         return (
           <div key={group.id} className="space-y-4">
-            <h3 className="text-lg font-medium">{group.title}</h3>
+            <div className="flex items-center gap-2 pb-2 border-b">
+              <Route className="h-5 w-5 text-gray-500" />
+              <h3 className="text-base font-medium">{group.title}</h3>
+            </div>
             <Card className="p-6">
-              <div className="space-y-4">
+              <div className="grid gap-6">
                 {group.fields.map((field) => (
-                  <div key={field.id} className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right">
+                  <div key={field.id} className="grid grid-cols-12 items-start gap-4">
+                    <Label className="col-span-2 text-sm font-medium text-gray-500 text-right pt-2">
                       {field.title}
                       {field.required && <span className="text-red-500 ml-1">*</span>}
                     </Label>
-                    <div className="col-span-3">
+                    <div className="col-span-10">
                       {isArrayField(field, getFieldValue(field, config))
                         ? renderArrayField(field, getFieldValue(field, config) as any[])
                         : renderField(field, getFieldValue(field, config))}
                       {field.description && (
-                        <p className="text-sm text-gray-500 mt-1">{field.description}</p>
+                        <p className="text-sm text-gray-500 mt-1.5">{field.description}</p>
                       )}
                     </div>
                   </div>
@@ -1371,7 +1449,10 @@ export default function ConfigForm({
 
       {/* 安全设置部分 */}
       <div className="space-y-4">
-        <h3 className="text-lg font-medium">{t('proxy.securitySettings')}</h3>
+        <div className="flex items-center gap-2 pb-2 border-b">
+          <Shield className="h-5 w-5 text-gray-500" />
+          <h3 className="text-base font-medium">{t('proxy.securitySettings')}</h3>
+        </div>
         <Card className="p-6">
           <SecuritySettingsForm config={config} onChange={onChange} />
         </Card>
@@ -1379,20 +1460,12 @@ export default function ConfigForm({
 
       {/* 高级设置部分 */}
       <div className="space-y-4">
-        <h3 className="text-lg font-medium">{t('proxy.advancedSettings')}</h3>
+        <div className="flex items-center gap-2 pb-2 border-b">
+          <Settings2 className="h-5 w-5 text-gray-500" />
+          <h3 className="text-base font-medium">{t('proxy.advancedSettings')}</h3>
+        </div>
         <Card className="p-6">
           <AdvancedSettingsForm config={config} onChange={onChange} />
-        </Card>
-      </div>
-
-      {/* SSL设置面板 */}
-      <div className="space-y-4">
-        <h3 className="text-lg font-medium">{t('proxy.sslSettings')}</h3>
-        <Card className="p-6">
-          <SSLSettingsForm
-            config={config}
-            onChange={onChange}
-          />
         </Card>
       </div>
     </div>

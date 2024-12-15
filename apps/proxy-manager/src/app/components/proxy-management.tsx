@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ServerConfigPanel } from "./config-panels"
 import { UpstreamPanel } from "./upstream-panel"
 import { JsonConfig, ServerConfig, ConfigGroup, UpstreamConfig } from "@/types/proxy-config"
+import { useWebSocket } from "@/hooks/useWebSocket"
 
 // 定义配置模板
 const getServerConfigTemplate = (t: any): ConfigGroup[] => [
@@ -267,6 +268,7 @@ export default function ProxyManagement() {
   const [selectedServer, setSelectedServer] = useState<string>()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const { isConnected } = useWebSocket()
 
   // 改进的配置加载逻辑
   useEffect(() => {
@@ -423,6 +425,7 @@ export default function ProxyManagement() {
               onUpstreamsChange={handleUpstreamsChange}
               onAddServer={handleAddServer}
               configTemplate={SERVER_CONFIG_TEMPLATE}
+              isConnected={isConnected}
             />
           </TabsContent>
 

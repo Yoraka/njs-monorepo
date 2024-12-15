@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { getWebSocketClient } from '@/services/ws-client';
 import { getConfigService } from '@/services/config-service';
 import { ServerConfig } from '@/types/proxy-config';
-import { ConfigStatus, ServiceStatus } from '@/services/config-service';
+import { ConfigStatus, ConfigStatusInfo } from '@/services/config-service';
 
 export type StatusCallback = (status: ConfigStatus) => void;
 export type ErrorCallback = (error: Error) => void;
@@ -13,10 +13,7 @@ export function useWebSocket() {
   
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-  const [configStatus, setConfigStatus] = useState<ConfigStatus>({
-    lastUpdate: 0,
-    status: 'idle'
-  });
+  const [configStatus, setConfigStatus] = useState<ConfigStatus>(ConfigStatus.SAVED);
 
   useEffect(() => {
     const handleConnect = () => {
@@ -44,21 +41,14 @@ export function useWebSocket() {
   // 配置更新方法
   const updateConfig = useCallback(async (config: ServerConfig): Promise<void> => {
     try {
-      setConfigStatus({ ...configStatus, status: 'updating' });
+      setConfigStatus(ConfigStatus.SAVING);
       await configService.updateConfig(config);
-      setConfigStatus({
-        lastUpdate: Date.now(),
-        status: 'idle'
-      });
+      setConfigStatus(ConfigStatus.SAVED);
     } catch (error) {
-      setConfigStatus({
-        ...configStatus,
-        status: 'error',
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
+      setConfigStatus(ConfigStatus.ERROR);
       throw error;
     }
-  }, [configStatus]);
+  }, []);
 
   // 文件上传方法
   const uploadFile = useCallback(async (file: File, type: 'cert' | 'key' | 'other'): Promise<void> => {
@@ -78,8 +68,8 @@ export function useWebSocket() {
 
   // 状态订阅方法
   const subscribeToStatus = useCallback((callback: StatusCallback): () => void => {
-    const handleStatusChange = () => {
-      callback(configService.getConfigStatus());
+    const handleStatusChange = (status: ConfigStatusInfo) => {
+      callback(status.status);
     };
     
     wsClient.on('configChanged', handleStatusChange);

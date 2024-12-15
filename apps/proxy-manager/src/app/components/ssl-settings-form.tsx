@@ -4,10 +4,11 @@ import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { X } from 'lucide-react';
+import { X, Upload, Shield, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { toast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
 
 interface SSLSettingsFormProps {
   config: ServerConfig;
@@ -51,10 +52,8 @@ export const SSLSettingsForm = ({ config, onChange }: SSLSettingsFormProps) => {
     const file = event.target.files?.[0];
     if (file) {
       try {
-        // 上传文件
         await uploadFile(file, type);
         
-        // 读取文件内容
         const reader = new FileReader();
         reader.onload = (e) => {
           const currentConfig = getCurrentSSL();
@@ -83,82 +82,152 @@ export const SSLSettingsForm = ({ config, onChange }: SSLSettingsFormProps) => {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <Label>{t('proxy.sslSettings')}</Label>
-        <Switch
-          checked={!!config.ssl?.enabled}
-          onCheckedChange={(checked) => {
-            onChange({
-              ssl: checked ? defaultSSL : undefined
-            });
-          }}
-        />
-      </div>
-
-      {config.ssl?.enabled && (
-        <div className="grid gap-4 pl-4">
+    <div className="space-y-8">
+      {/* 证书配置部分 */}
+      <div className="space-y-6">
+        <div className="flex items-center gap-2 pb-2 border-b">
+          <Shield className="h-5 w-5 text-gray-500" />
+          <h3 className="text-base font-medium">{t('proxy.certificateConfig')}</h3>
+        </div>
+        
+        <div className="grid gap-6 pl-7">
           {/* 证书文件上传 */}
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label className="text-right">{t('proxy.certificate')}</Label>
-            <div className="col-span-3">
-              <Input
-                type="file"
-                accept=".pem,.crt"
-                onChange={handleFileUpload('cert')}
-              />
-              {config.ssl.cert && (
-                <p className="text-sm text-gray-500 mt-1">
-                  {t('proxy.certificateUploaded')}
-                </p>
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-gray-700">
+              {t('proxy.certificate')}
+            </Label>
+            <div className="flex items-center gap-4">
+              <div className="relative flex-1">
+                <Input
+                  type="file"
+                  accept=".pem,.crt"
+                  onChange={handleFileUpload('cert')}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                />
+                <div className={cn(
+                  "flex items-center gap-2 px-4 py-2 rounded-lg border-2 border-dashed transition-colors hover:bg-gray-50",
+                  config.ssl?.cert ? "border-emerald-200 bg-emerald-50/50" : "border-gray-200"
+                )}>
+                  <Upload className="h-4 w-4 text-gray-400" />
+                  <span className="text-sm text-gray-600">
+                    {config.ssl?.cert ? t('proxy.certificateUploaded') : t('proxy.chooseCertificate')}
+                  </span>
+                </div>
+              </div>
+              {config.ssl?.cert && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 text-gray-500 hover:text-gray-700"
+                  onClick={() => {
+                    const currentConfig = getCurrentSSL();
+                    onChange({
+                      ssl: {
+                        ...currentConfig,
+                        cert: ''
+                      }
+                    });
+                  }}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
               )}
             </div>
           </div>
 
           {/* 私钥文件上传 */}
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label className="text-right">{t('proxy.privateKey')}</Label>
-            <div className="col-span-3">
-              <Input
-                type="file"
-                accept=".pem,.key"
-                onChange={handleFileUpload('key')}
-              />
-              {config.ssl.key && (
-                <p className="text-sm text-gray-500 mt-1">
-                  {t('proxy.privateKeyUploaded')}
-                </p>
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-gray-700">
+              {t('proxy.privateKey')}
+            </Label>
+            <div className="flex items-center gap-4">
+              <div className="relative flex-1">
+                <Input
+                  type="file"
+                  accept=".pem,.key"
+                  onChange={handleFileUpload('key')}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                />
+                <div className={cn(
+                  "flex items-center gap-2 px-4 py-2 rounded-lg border-2 border-dashed transition-colors hover:bg-gray-50",
+                  config.ssl?.key ? "border-emerald-200 bg-emerald-50/50" : "border-gray-200"
+                )}>
+                  <Upload className="h-4 w-4 text-gray-400" />
+                  <span className="text-sm text-gray-600">
+                    {config.ssl?.key ? t('proxy.privateKeyUploaded') : t('proxy.choosePrivateKey')}
+                  </span>
+                </div>
+              </div>
+              {config.ssl?.key && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 text-gray-500 hover:text-gray-700"
+                  onClick={() => {
+                    const currentConfig = getCurrentSSL();
+                    onChange({
+                      ssl: {
+                        ...currentConfig,
+                        key: ''
+                      }
+                    });
+                  }}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
               )}
             </div>
           </div>
+        </div>
+      </div>
 
+      {/* 协议设置部分 */}
+      <div className="space-y-6">
+        <div className="flex items-center gap-2 pb-2 border-b">
+          <Zap className="h-5 w-5 text-gray-500" />
+          <h3 className="text-base font-medium">{t('proxy.protocolSettings')}</h3>
+        </div>
+
+        <div className="grid gap-6 pl-7">
           {/* HTTP/2 开关 */}
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label className="text-right">{t('proxy.http2')}</Label>
-            <div className="col-span-3">
-              <Switch
-                checked={!!config.ssl.http2}
-                onCheckedChange={(checked) => {
-                  const currentConfig = getCurrentSSL();
-                  onChange({
-                    ssl: {
-                      ...currentConfig,
-                      http2: checked
-                    }
-                  });
-                }}
-              />
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <Label className="text-sm font-medium text-gray-700">
+                {t('proxy.http2')}
+              </Label>
+              <p className="text-sm text-gray-500">
+                {t('proxy.http2Description')}
+              </p>
             </div>
+            <Switch
+              checked={!!config.ssl?.http2}
+              onCheckedChange={(checked) => {
+                const currentConfig = getCurrentSSL();
+                onChange({
+                  ssl: {
+                    ...currentConfig,
+                    http2: checked
+                  }
+                });
+              }}
+            />
           </div>
 
           {/* TLS协议版本选择 */}
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label className="text-right">{t('proxy.tlsProtocols')}</Label>
-            <div className="col-span-3 flex flex-wrap gap-2">
+          <div className="space-y-3">
+            <Label className="text-sm font-medium text-gray-700">
+              {t('proxy.tlsProtocols')}
+            </Label>
+            <div className="flex flex-wrap gap-3">
               {['TLSv1.2', 'TLSv1.3'].map((protocol) => (
                 <div
                   key={protocol}
-                  className="flex items-center gap-1 bg-gray-100 px-2 py-1 rounded"
+                  className={cn(
+                    "flex items-center gap-3 px-4 py-3 rounded-lg border transition-colors",
+                    config.ssl?.protocols?.includes(protocol)
+                      ? "border-primary bg-primary/5"
+                      : "border-gray-200 bg-gray-50/50"
+                  )}
                 >
                   <Switch
                     checked={config.ssl?.protocols?.includes(protocol) ?? false}
@@ -175,35 +244,47 @@ export const SSLSettingsForm = ({ config, onChange }: SSLSettingsFormProps) => {
                       });
                     }}
                   />
-                  <span>{protocol}</span>
+                  <span className="text-sm font-medium text-gray-700">{protocol}</span>
                 </div>
               ))}
             </div>
           </div>
 
           {/* HTTP重定向HTTPS开关 */}
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label className="text-right">{t('proxy.sslRedirect')}</Label>
-            <div className="col-span-3">
-              <Switch
-                checked={!!config.ssl.sslRedirect}
-                onCheckedChange={(checked) => {
-                  const currentConfig = getCurrentSSL();
-                  onChange({
-                    ssl: {
-                      ...currentConfig,
-                      sslRedirect: checked
-                    }
-                  });
-                }}
-              />
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <Label className="text-sm font-medium text-gray-700">
+                {t('proxy.sslRedirect')}
+              </Label>
+              <p className="text-sm text-gray-500">
+                {t('proxy.sslRedirectDescription')}
+              </p>
             </div>
+            <Switch
+              checked={!!config.ssl?.sslRedirect}
+              onCheckedChange={(checked) => {
+                const currentConfig = getCurrentSSL();
+                onChange({
+                  ssl: {
+                    ...currentConfig,
+                    sslRedirect: checked
+                  }
+                });
+              }}
+            />
           </div>
 
           {/* 客户端证书设置 */}
-          <div className="grid grid-cols-4 items-start gap-4">
-            <Label className="text-right">{t('proxy.clientCertificate')}</Label>
-            <div className="col-span-3 space-y-4">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="space-y-1">
+                <Label className="text-sm font-medium text-gray-700">
+                  {t('proxy.clientCertificate')}
+                </Label>
+                <p className="text-sm text-gray-500">
+                  {t('proxy.clientCertDescription')}
+                </p>
+              </div>
               <Switch
                 checked={!!config.ssl?.clientCertificate?.enabled}
                 onCheckedChange={(checked) => {
@@ -220,41 +301,43 @@ export const SSLSettingsForm = ({ config, onChange }: SSLSettingsFormProps) => {
                   });
                 }}
               />
-
-              {config.ssl?.clientCertificate?.enabled && (
-                <div className="pl-4">
-                  <div className="grid grid-cols-3 items-center gap-4">
-                    <Label>{t('proxy.verifyMode')}</Label>
-                    <Select
-                      value={config.ssl?.clientCertificate?.verify ?? 'optional'}
-                      onValueChange={(value: 'optional' | 'require') => {
-                        const currentConfig = getCurrentSSL();
-                        onChange({
-                          ssl: {
-                            ...currentConfig,
-                            clientCertificate: {
-                              ...currentConfig.clientCertificate,
-                              verify: value
-                            }
-                          }
-                        });
-                      }}
-                    >
-                      <SelectTrigger className="col-span-2">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="optional">{t('proxy.optional')}</SelectItem>
-                        <SelectItem value="require">{t('proxy.required')}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              )}
             </div>
+
+            {config.ssl?.clientCertificate?.enabled && (
+              <div className="pl-6 pt-2 border-l-2 border-gray-100">
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium text-gray-700">
+                    {t('proxy.verifyMode')}
+                  </Label>
+                  <Select
+                    value={config.ssl?.clientCertificate?.verify ?? 'optional'}
+                    onValueChange={(value: 'optional' | 'require') => {
+                      const currentConfig = getCurrentSSL();
+                      onChange({
+                        ssl: {
+                          ...currentConfig,
+                          clientCertificate: {
+                            ...currentConfig.clientCertificate,
+                            verify: value
+                          }
+                        }
+                      });
+                    }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="optional">{t('proxy.optional')}</SelectItem>
+                      <SelectItem value="require">{t('proxy.required')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 };
