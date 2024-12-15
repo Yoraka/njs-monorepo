@@ -1,10 +1,38 @@
 import * as WebSocket from 'ws';
 import { Server } from 'http';
-import { Config, MonitoringData, ServerMetrics, SystemMetrics } from './types';
+import { Config, MonitoringData, ServerMetrics, SystemMetrics, ValidationResult } from './types';
 import { Logger } from 'winston';
 import { EventEmitter } from 'events';
 import { collectSystemMetrics } from './utils/systemMetrics';
-// import cors from 'cors';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+
+interface WebSocketMessage {
+  type: string;
+  id: string;
+  data: any;
+  timestamp: number;
+}
+
+interface ConfigUpdateMessage extends WebSocketMessage {
+  type: 'configUpdate';
+  data: {
+    config: Config;
+    files?: Array<{
+      path: string;
+      content: string;
+    }>;
+  };
+}
+
+interface FileUploadMessage extends WebSocketMessage {
+  type: 'fileUpload';
+  data: {
+    path: string;
+    content: string;
+    type: 'cert' | 'key' | 'other';
+  };
+}
 
 /**
  * 监控模块类
@@ -98,6 +126,16 @@ export class Monitor extends EventEmitter {
       this.clients.add(ws);
       this.logger.info('New monitoring client connected');
 
+      ws.on('message', async (data: WebSocket.Data) => {
+        try {
+          const message = JSON.parse(data.toString()) as WebSocketMessage;
+          await this.handleMessage(ws, message);
+        } catch (error) {
+          this.logger.error('Failed to handle WebSocket message:', error);
+          this.sendErrorResponse(ws, 'messageError', 'Failed to process message');
+        }
+      });
+
       ws.once('close', () => {
         this.clients.delete(ws);
         this.logger.info('Monitoring client disconnected');
@@ -109,6 +147,284 @@ export class Monitor extends EventEmitter {
         this.clients.delete(ws);
         ws.removeAllListeners();
       });
+    });
+  }
+
+  /**
+   * 处理WebSocket消息
+   */
+  private async handleMessage(ws: WebSocket, message: WebSocketMessage): Promise<void> {
+    this.logger.debug('Received message:', message);
+
+    try {
+      switch (message.type) {
+        case 'configUpdate':
+          await this.handleConfigUpdate(ws, message as ConfigUpdateMessage);
+          break;
+        case 'fileUpload':
+          await this.handleFileUpload(ws, message as FileUploadMessage);
+          break;
+        case 'configValidate':
+          await this.handleConfigValidate(ws, message);
+          break;
+        case 'getMetrics':
+          this.handleGetMetrics(ws);
+          break;
+        default:
+          this.sendErrorResponse(ws, message.id, `Unknown message type: ${message.type}`);
+      }
+    } catch (error) {
+      this.logger.error('Error handling message:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.sendErrorResponse(ws, message.id, errorMessage);
+    }
+  }
+
+  /**
+   * 处理配置更新
+   */
+  private async handleConfigUpdate(ws: WebSocket, message: ConfigUpdateMessage): Promise<void> {
+    try {
+      // 验证配置
+      const validationResult = await this.validateConfig(message.data.config);
+      if (!validationResult.valid) {
+        this.sendResponse(ws, message.id, {
+          type: 'configUpdateResponse',
+          success: false,
+          error: 'Invalid configuration',
+          validationResult
+        });
+        return;
+      }
+
+      // 保存文件
+      if (message.data.files) {
+        await this.saveFiles(message.data.files);
+      }
+
+      // 更新配置
+      this.updateConfig(message.data.config);
+
+      // 发送成功响应
+      this.sendResponse(ws, message.id, {
+        type: 'configUpdateResponse',
+        success: true,
+        validationResult
+      });
+
+      // 广播配置更新事件
+      this.broadcastMessage({
+        type: 'configChanged',
+        timestamp: Date.now()
+      });
+    } catch (error) {
+      this.logger.error('Failed to update config:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.sendErrorResponse(ws, message.id, errorMessage);
+    }
+  }
+
+  /**
+   * 处理文件上传
+   */
+  private async handleFileUpload(ws: WebSocket, message: FileUploadMessage): Promise<void> {
+    try {
+      const { path: filePath, content, type } = message.data;
+      
+      // 验证文件类型和路径
+      if (!this.validateFilePath(filePath, type)) {
+        throw new Error('Invalid file path or type');
+      }
+
+      // 保存文件
+      await this.saveFile(filePath, content);
+
+      // 发送成功响应
+      this.sendResponse(ws, message.id, {
+        type: 'fileUploadResponse',
+        success: true
+      });
+    } catch (error) {
+      this.logger.error('Failed to upload file:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.sendErrorResponse(ws, message.id, errorMessage);
+    }
+  }
+
+  /**
+   * 处理配置验证
+   */
+  private async handleConfigValidate(ws: WebSocket, message: WebSocketMessage): Promise<void> {
+    try {
+      const validationResult = await this.validateConfig(message.data);
+      this.sendResponse(ws, message.id, {
+        type: 'configValidateResponse',
+        success: true,
+        data: validationResult
+      });
+    } catch (error) {
+      this.logger.error('Failed to validate config:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.sendErrorResponse(ws, message.id, errorMessage);
+    }
+  }
+
+  /**
+   * 处理获取指标请求
+   */
+  private handleGetMetrics(ws: WebSocket): void {
+    const metrics = this.getMetrics();
+    ws.send(JSON.stringify({
+      type: 'metrics',
+      data: metrics,
+      timestamp: Date.now()
+    }));
+  }
+
+  /**
+   * 验证配置
+   */
+  private async validateConfig(config: Config): Promise<ValidationResult> {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    try {
+      // 验证基本字段
+      if (!config.servers || !Array.isArray(config.servers)) {
+        errors.push('Missing or invalid servers configuration');
+      }
+
+      // 验证每个服务器配置
+      config.servers?.forEach((server, index) => {
+        if (!server.name) {
+          errors.push(`Server ${index + 1} is missing name`);
+        }
+        if (!server.listen) {
+          errors.push(`Server ${server.name || index + 1} is missing listen port`);
+        }
+        if (server.ssl?.enabled) {
+          if (!server.ssl.cert) {
+            errors.push(`Server ${server.name} is missing SSL certificate`);
+          }
+          if (!server.ssl.key) {
+            errors.push(`Server ${server.name} is missing SSL key`);
+          }
+        }
+      });
+
+      // 验证上游服务器配置
+      config.upstreams?.forEach((upstream, index) => {
+        if (!upstream.name) {
+          errors.push(`Upstream ${index + 1} is missing name`);
+        }
+        if (!upstream.servers || upstream.servers.length === 0) {
+          errors.push(`Upstream ${upstream.name || index + 1} has no servers`);
+        }
+      });
+
+      // 添加警告
+      if (config.servers?.some(server => !server.healthCheck)) {
+        warnings.push('Some servers do not have health checks configured');
+      }
+
+      return {
+        valid: errors.length === 0,
+        errors,
+        warnings
+      };
+    } catch (error) {
+      this.logger.error('Config validation error:', error);
+      return {
+        valid: false,
+        errors: ['Internal validation error'],
+        warnings
+      };
+    }
+  }
+
+  /**
+   * 验证文件路径
+   */
+  private validateFilePath(filePath: string, type: string): boolean {
+    // 规范化路径
+    const normalizedPath = path.normalize(filePath).replace(/^(\.\.(\/|\\|$))+/, '');
+    
+    // 检查文件类型和路径
+    switch (type) {
+      case 'cert':
+        return /\.(crt|pem)$/.test(normalizedPath) && normalizedPath.startsWith('certs/');
+      case 'key':
+        return /\.(key|pem)$/.test(normalizedPath) && normalizedPath.startsWith('certs/');
+      case 'other':
+        return !normalizedPath.includes('..') && !path.isAbsolute(normalizedPath);
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * 保存文件
+   */
+  private async saveFile(filePath: string, content: string): Promise<void> {
+    try {
+      // 规范化路径
+      const normalizedPath = path.normalize(filePath);
+      
+      // 创建目录
+      await fs.mkdir(path.dirname(normalizedPath), { recursive: true });
+      
+      // 写入文件
+      await fs.writeFile(normalizedPath, content, 'utf8');
+      
+      this.logger.info(`File saved: ${normalizedPath}`);
+    } catch (error) {
+      this.logger.error('Failed to save file:', error);
+      throw new Error(`Failed to save file: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * 批量保存文件
+   */
+  private async saveFiles(files: Array<{ path: string; content: string }>): Promise<void> {
+    for (const file of files) {
+      await this.saveFile(file.path, file.content);
+    }
+  }
+
+  /**
+   * 发送WebSocket响应
+   */
+  private sendResponse(ws: WebSocket, id: string, response: any): void {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        ...response,
+        id,
+        timestamp: Date.now()
+      }));
+    }
+  }
+
+  /**
+   * 发送错误响应
+   */
+  private sendErrorResponse(ws: WebSocket, id: string, error: string): void {
+    this.sendResponse(ws, id, {
+      type: 'error',
+      success: false,
+      error
+    });
+  }
+
+  /**
+   * 广播消息给所有客户端
+   */
+  private broadcastMessage(message: any): void {
+    const payload = JSON.stringify(message);
+    this.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(payload);
+      }
     });
   }
 
@@ -170,7 +486,7 @@ export class Monitor extends EventEmitter {
         metrics: this.currentSystemMetrics
       });
     } catch (error) {
-      this.logger.error('收集系统指标时出错:', error);
+      this.logger.error('收集系统指标时出错:', error instanceof Error ? error.message : String(error));
     }
   }
 

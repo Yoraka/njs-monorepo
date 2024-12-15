@@ -6,6 +6,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Button } from '@/components/ui/button';
 import { X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useWebSocket } from '@/hooks/useWebSocket';
+import { toast } from '@/hooks/use-toast';
 
 interface SSLSettingsFormProps {
   config: ServerConfig;
@@ -28,6 +30,7 @@ const defaultSSL: SSLConfig = {
 
 export const SSLSettingsForm = ({ config, onChange }: SSLSettingsFormProps) => {
   const { t } = useTranslation();
+  const { uploadFile } = useWebSocket();
 
   // 获取当前的SSL配置，确保所有字段都有值
   const getCurrentSSL = (): SSLConfig => ({
@@ -44,20 +47,38 @@ export const SSLSettingsForm = ({ config, onChange }: SSLSettingsFormProps) => {
   });
 
   // 处理文件上传
-  const handleFileUpload = (type: 'cert' | 'key') => (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = (type: 'cert' | 'key') => async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const currentConfig = getCurrentSSL();
-        onChange({
-          ssl: {
-            ...currentConfig,
-            [type]: e.target?.result as string
-          }
+      try {
+        // 上传文件
+        await uploadFile(file, type);
+        
+        // 读取文件内容
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const currentConfig = getCurrentSSL();
+          onChange({
+            ssl: {
+              ...currentConfig,
+              [type]: e.target?.result as string
+            }
+          });
+        };
+        reader.readAsText(file);
+
+        toast({
+          title: t('proxy.fileUploaded'),
+          description: t('proxy.fileUploadedDesc'),
         });
-      };
-      reader.readAsText(file);
+      } catch (err) {
+        const error = err as Error;
+        toast({
+          title: t('proxy.uploadError'),
+          description: error.message,
+          variant: 'destructive',
+        });
+      }
     }
   };
 

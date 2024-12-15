@@ -191,7 +191,7 @@ export interface ProxyStats {
 }
 
 /**
- * 监控数据接口
+ * 监控数据接���
  */
 export interface MonitoringData {
     activeConnections: number;
@@ -258,4 +258,67 @@ export interface UpstreamConfig {
     balancer: string;
     servers: UpstreamServer[];
     healthCheck?: HealthCheckConfig;
+}
+
+/**
+ * WebSocket基础消息接口
+ */
+export interface WebSocketMessage {
+  type: string;
+  id: string;
+  data: any;
+  timestamp: number;
+}
+
+/**
+ * 配置更新消息接口
+ */
+export interface ConfigUpdateMessage extends WebSocketMessage {
+  type: 'configUpdate';
+  data: {
+    config: ServerConfig;
+    files?: Array<{
+      path: string;
+      content: string;
+    }>;
+  };
+}
+
+/**
+ * 文件上传消息接口
+ */
+export interface FileUploadMessage extends WebSocketMessage {
+  type: 'fileUpload';
+  data: {
+    path: string;
+    content: string;
+    type: 'cert' | 'key' | 'other';
+  };
+}
+
+/**
+ * 配置验证结果接口
+ */
+export interface ValidationResult {
+  valid: boolean;
+  warnings: string[];
+  errors: string[];
+}
+
+/**
+ * 服务状态接口
+ */
+export interface ServiceStatus {
+  isRunning: boolean;
+  uptime: number;
+  activeConnections: number;
+  lastRestart?: number;
+  version?: string;
+  pid?: number;
+  memoryUsage?: {
+    heapUsed: number;
+    heapTotal: number;
+    external: number;
+    rss: number;
+  };
 }

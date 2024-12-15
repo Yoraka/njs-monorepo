@@ -1,4 +1,4 @@
-import { ServerConfig, ConfigGroup, ConfigField, UpstreamConfig, LocationConfig, RateLimitConfig, IPFilterConfig, CSRFConfig, HeadersConfig, HealthCheckConfig } from '@/types/proxy-config';
+import { ServerConfig, ConfigGroup, ConfigField, UpstreamConfig, LocationConfig, RateLimitConfig, IPFilterConfig, CSRFConfig, HeadersConfig, HealthCheckConfig, ValidationResult } from '@/types/proxy-config';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -6,10 +6,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Trash2, X } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { UpstreamPanel } from '@/app/components/upstream-panel';
 import { useTranslation } from 'react-i18next';
-import SSLSettingsForm from './ssl-settings-form';
+import { SSLSettingsForm } from './ssl-settings-form';
+import { useWebSocket } from '@/hooks/useWebSocket';
+import { toast } from '@/hooks/use-toast';
 
 interface ConfigFormProps {
   config?: ServerConfig;
@@ -28,6 +30,82 @@ export default function ConfigForm({
 }: ConfigFormProps) {
   const { t } = useTranslation();
   const [showUpstreamPanel, setShowUpstreamPanel] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  
+  const {
+    isConnected,
+    error,
+    configStatus,
+    updateConfig,
+    uploadFile,
+  } = useWebSocket();
+
+  // 保存配置
+  const handleSave = useCallback(async () => {
+    if (!config) return;
+
+    try {
+      setIsSaving(true);
+      
+      // 验证配置
+      const validationResult = await updateConfig(config);
+      
+      if (!validationResult.valid) {
+        toast({
+          title: t('proxy.validationError'),
+          description: validationResult.errors.join('\n'),
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      if (validationResult.warnings.length > 0) {
+        toast({
+          title: t('proxy.warnings'),
+          description: validationResult.warnings.join('\n'),
+          variant: 'warning',
+        });
+      }
+
+      toast({
+        title: t('proxy.configSaved'),
+        description: t('proxy.configSavedDesc'),
+      });
+
+    } catch (err) {
+      const error = err as Error;
+      toast({
+        title: t('proxy.saveError'),
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  }, [config, updateConfig, t]);
+
+  // 处理文件上传
+  const handleFileUpload = useCallback(async (file: File, type: 'cert' | 'key' | 'other') => {
+    try {
+      await uploadFile(file, type);
+      toast({
+        title: t('proxy.fileUploaded'),
+        description: t('proxy.fileUploadedDesc'),
+      });
+    } catch (err) {
+      const error = err as Error;
+      toast({
+        title: t('proxy.uploadError'),
+        description: error.message,
+        variant: 'destructive',
+      });
+    }
+  }, [uploadFile, t]);
+
+  const handleUpstreamChange = useCallback((newUpstreams: UpstreamConfig[]) => {
+    onUpstreamsChange(newUpstreams);
+    setShowUpstreamPanel(false);
+  }, [onUpstreamsChange]);
 
   if (!config) return null;
 
@@ -393,11 +471,6 @@ export default function ConfigForm({
     );
   };
 
-  const handleUpstreamChange = (newUpstreams: UpstreamConfig[]) => {
-    onUpstreamsChange?.(newUpstreams);
-    setShowUpstreamPanel(false);
-  };
-
   const SecuritySettingsForm = ({ config, onChange }: {
     config: ServerConfig;
     onChange: (changes: Partial<ServerConfig>) => void;
@@ -446,7 +519,7 @@ export default function ConfigForm({
       statusCode: 429
     };
 
-    // 获取当前的速率限制配置，确保所有必需段都有值
+    // 获取当前的速率限制配置，确保所有必需���都有值
     const getCurrentRateLimit = (): RateLimitConfig => ({
       windowMs: config.rateLimit?.windowMs ?? defaultRateLimit.windowMs,
       max: config.rateLimit?.max ?? defaultRateLimit.max,
@@ -1216,7 +1289,28 @@ export default function ConfigForm({
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold">{t('proxy.configTitle')}</h2>
+        <div className="flex items-center gap-4">
+          {!isConnected && (
+            <p className="text-sm text-red-500">{t('proxy.notConnected')}</p>
+          )}
+          <Button 
+            onClick={handleSave}
+            disabled={!isConnected || isSaving}
+          >
+            {isSaving ? t('proxy.saving') : t('proxy.save')}
+          </Button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-md p-4">
+          <p className="text-sm text-red-600">{error.message}</p>
+        </div>
+      )}
+
       {showUpstreamPanel && (
         <div 
           className="fixed inset-0 bg-black/50 z-50"

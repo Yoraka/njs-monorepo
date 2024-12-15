@@ -214,3 +214,12 @@ export interface Config {
     excludePaths?: string[]; // 排除路径
     tokenNames?: string[];   // 自定义 token 名称
   }
+  
+  /**
+   * 配置验证结果接口
+   */
+  export interface ValidationResult {
+    valid: boolean;
+    errors: string[];
+    warnings: string[];
+  }

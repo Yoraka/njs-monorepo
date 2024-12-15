@@ -1,5 +1,14 @@
 import { EventEmitter } from 'events'
 import { MetricsData } from '@/types/metrics'
+import { ServerConfig, ConfigUpdateMessage, FileUploadMessage, ValidationResult, ServiceStatus } from '@/types/proxy-config'
+
+interface PendingMessage {
+  type: string;
+  id: string;
+  resolve: (value: any) => void;
+  reject: (error: any) => void;
+  timestamp: number;
+}
 
 export class WebSocketClient extends EventEmitter {
   private static instance: WebSocketClient | null = null
@@ -12,6 +21,8 @@ export class WebSocketClient extends EventEmitter {
   private reconnecting = false
   private instanceId: string
   private connectionState: 'connecting' | 'connected' | 'disconnected' | 'failed' = 'disconnected'
+  private messageQueue: Array<PendingMessage> = [];
+  private messageTimeout = 30000; // 30秒超时
 
   private constructor(url: string) {
     super()
@@ -70,23 +81,7 @@ export class WebSocketClient extends EventEmitter {
         this.send(JSON.stringify({ type: 'getMetrics' }))
       }
 
-      this.ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data) as MetricsData
-          console.log('Debug - WebSocket 收到数据:', {
-            instanceId: this.instanceId,
-            timestamp: data.timestamp,
-            serverCount: Object.keys(data.serverMetrics || {}).length,
-            servers: Object.keys(data.serverMetrics || {})
-          })
-          this.emit('metrics', data)
-        } catch (error) {
-          console.error('Debug - 解析 WebSocket 消息失败:', {
-            instanceId: this.instanceId,
-            error
-          })
-        }
-      }
+      this.ws.onmessage = this.handleMessage.bind(this)
 
       this.ws.onclose = (event) => {
         clearTimeout(connectionTimeout)
@@ -188,6 +183,10 @@ export class WebSocketClient extends EventEmitter {
     this.removeAllListeners()
     WebSocketClient.instanceCount--
     WebSocketClient.instance = null
+    this.messageQueue.forEach(msg => {
+      msg.reject(new Error('WebSocket connection closed'));
+    });
+    this.messageQueue = [];
   }
 
   public send(data: string) {
@@ -208,6 +207,121 @@ export class WebSocketClient extends EventEmitter {
       connectionState: this.connectionState,
       reconnectAttempts: this.reconnectAttempts,
       readyState: this.ws?.readyState
+    }
+  }
+
+  public async sendConfigUpdate(config: ServerConfig, files?: Array<{ path: string; content: string }>): Promise<void> {
+    return this.sendWithResponse({
+      type: 'configUpdate',
+      data: {
+        config,
+        files
+      }
+    });
+  }
+
+  public async sendFileUpload(path: string, content: string, type: 'cert' | 'key' | 'other'): Promise<void> {
+    return this.sendWithResponse({
+      type: 'fileUpload',
+      data: {
+        path,
+        content,
+        type
+      }
+    });
+  }
+
+  public async validateConfig(config: ServerConfig): Promise<ValidationResult> {
+    return this.sendWithResponse({
+      type: 'configValidate',
+      data: config
+    });
+  }
+
+  public async deleteFile(path: string): Promise<void> {
+    return this.sendWithResponse({
+      type: 'deleteFile',
+      data: { path }
+    });
+  }
+
+  public async getServiceStatus(): Promise<ServiceStatus> {
+    return this.sendWithResponse({
+      type: 'getServiceStatus',
+      data: null
+    });
+  }
+
+  private async sendWithResponse(message: any): Promise<any> {
+    if (this.ws?.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket is not connected');
+    }
+
+    return new Promise((resolve, reject) => {
+      const id = `${message.type}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const timestamp = Date.now();
+
+      // 添加到消息队列
+      this.messageQueue.push({
+        type: message.type,
+        id,
+        resolve,
+        reject,
+        timestamp
+      });
+
+      // 设置超时
+      setTimeout(() => {
+        const index = this.messageQueue.findIndex(msg => msg.id === id);
+        if (index !== -1) {
+          const msg = this.messageQueue[index];
+          this.messageQueue.splice(index, 1);
+          msg.reject(new Error('Request timeout'));
+        }
+      }, this.messageTimeout);
+
+      // 发送消息
+      this.send(JSON.stringify({
+        ...message,
+        id,
+        timestamp
+      }));
+    });
+  }
+
+  private handleMessage(event: MessageEvent): void {
+    try {
+      const data = JSON.parse(event.data);
+      
+      // 处理监控数据
+      if (data.type === 'metrics') {
+        this.emit('metrics', data);
+        return;
+      }
+
+      // 处理响应消息
+      if (data.type.endsWith('Response')) {
+        const requestType = data.type.replace('Response', '');
+        const pendingMessage = this.messageQueue.find(
+          msg => msg.type === requestType
+        );
+
+        if (pendingMessage) {
+          this.messageQueue = this.messageQueue.filter(msg => msg !== pendingMessage);
+          
+          if (data.success) {
+            pendingMessage.resolve(data.data);
+          } else {
+            pendingMessage.reject(new Error(data.error));
+          }
+        }
+        return;
+      }
+
+      // 处理其他消息类型
+      this.emit(data.type, data);
+    } catch (error) {
+      console.error('Failed to parse WebSocket message:', error);
     }
   }
 }
