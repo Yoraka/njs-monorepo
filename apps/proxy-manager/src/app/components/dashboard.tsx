@@ -1,7 +1,8 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useTranslation } from 'react-i18next'
+import { usePathname } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
@@ -164,12 +165,13 @@ const formatChartTime = (timestamp: string, timeRange: string) => {
   }
 }
 
-interface OverviewData {
+// 首先添加 OverviewData 类型定义（如果还没有的话）
+type OverviewData = {
   totalProxies: number
   activeProxies: number
   totalTraffic: string
   totalConnections: number
-  timestamp?: number // 添加时间戳用于判断缓存是否过期
+  timestamp?: number
 }
 
 // 缓存相关的工具函数
@@ -216,9 +218,20 @@ const formatBytes = (bytes: number, decimals: number = 2): string => {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
 }
 
+const formatTotalBytes = (bytes: number, decimals: number = 2): string => {
+  if (bytes === 0) return '0 B'
+  const k = 1024
+  const dm = decimals < 0 ? 0 : decimals
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
+}
+
 export default function Dashboard() {
   const { t } = useTranslation()
-  const [isLoading, setIsLoading] = useState(true)
+  const pathname = usePathname()
+  const isFirstMount = useRef(true)
+  const [isInitialLoading, setIsInitialLoading] = useState(true)
   const [overviewData, setOverviewData] = useState<OverviewData>(() => {
     return getOverviewCache() || {
       totalProxies: 0,
@@ -241,6 +254,9 @@ export default function Dashboard() {
   const [systemMetricsCache, setSystemMetricsCache] = useState<SystemMetrics | null>(null)
   const [systemMetricsError, setSystemMetricsError] = useState(0)
   const [lastErrorTime, setLastErrorTime] = useState(0)
+  const [errorCount, setErrorCount] = useState(0)
+  const lastRequestTime = useRef(0)
+  const MIN_REQUEST_INTERVAL = 5000 // 改为5秒，小于自动刷新间隔
 
   // 修改过滤逻辑，添加类型保护
   const filteredServers = Array.isArray(servers) ? servers.filter(server => {
@@ -252,167 +268,152 @@ export default function Dashboard() {
     return domainMatch || tagsMatch;
   }) : [];
 
-  // 优化 useEffect 的依赖和清理
-  useEffect(() => {
-    let isSubscribed = true;
+  // 修改 handleRefresh，添加请求限制和更好的错误处理
+  const handleRefresh = useCallback(async () => {
+    const now = Date.now()
+    if (now - lastRequestTime.current < MIN_REQUEST_INTERVAL) {
+      return
+    }
+    lastRequestTime.current = now
 
-    const fetchOverviewData = async () => {
-      try {
-        const response = await fetch('/api/proxy-stats?type=overview')
-        const data = await response.json()
-        if (!isSubscribed) return;
-        
-        const formatTrafficBytes = (bytes: number, decimals: number = 2): string => {
-          if (bytes === 0) return '0 B'
-          const k = 1024
-          const dm = decimals < 0 ? 0 : decimals
-          const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-          const i = Math.floor(Math.log(bytes) / Math.log(k))
-          return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
-        }
-
-        const newData = {
-          totalProxies: data.totalProxies,
-          activeProxies: data.activeProxies,
-          totalTraffic: formatTrafficBytes(data.totalTraffic),
-          totalConnections: data.totalConnections
-        }
-
-        setOverviewData(newData)
-        setOverviewCache(newData)
-        setIsLoading(false)
-      } catch (error) {
-        console.error('Failed to fetch overview data:', error)
-        if (!isSubscribed) return;
+    try {
+      if (errorCount >= 3) {
         const cachedData = getOverviewCache()
-        if (!cachedData) {
-          setIsLoading(true)
-        }
-      }
-    }
-
-    fetchOverviewData()
-    const interval = setInterval(fetchOverviewData, 5000)
-    
-    return () => {
-      isSubscribed = false
-      clearInterval(interval)
-    }
-  }, [])
-
-  // 优化服务器列表获取
-  useEffect(() => {
-    let isSubscribed = true;
-
-    const fetchServers = async () => {
-      try {
-        const response = await fetch('/api/proxy-stats/servers')
-        const data = await response.json()
-        if (!isSubscribed) return;
-        
-        if (Array.isArray(data)) {
-          setServers(data)
-          if (data.length > 0 && !selectedServer) {
-            setSelectedServer(data[0].domain)
-          }
-        } else {
-          console.error('Server data is not an array:', data)
-          setServers([])
-        }
-      } catch (error) {
-        console.error('Failed to fetch servers:', error)
-        if (!isSubscribed) return;
-        setServers([])
-      }
-    }
-
-    fetchServers()
-    const interval = setInterval(fetchServers, 10000)
-    
-    return () => {
-      isSubscribed = false
-      clearInterval(interval)
-    }
-  }, [selectedServer])
-
-  // 优化历史数据获取
-  useEffect(() => {
-    if (!selectedServer) return;
-    
-    let isSubscribed = true;
-
-    const fetchHistory = async () => {
-      try {
-        const response = await fetch(`/api/proxy-stats/history?domain=${selectedServer}&range=${timeRange}`)
-        const data = await response.json()
-        if (!isSubscribed) return;
-        setHistoryData(data.metrics || [])
-      } catch (error) {
-        console.error('Failed to fetch history:', error)
-        if (!isSubscribed) return;
-        setHistoryData([])
-      }
-    }
-
-    fetchHistory()
-    const interval = setInterval(fetchHistory, 10000)
-    
-    return () => {
-      isSubscribed = false
-      clearInterval(interval)
-    }
-  }, [selectedServer, timeRange])
-
-  // 优化系统指标获取
-  useEffect(() => {
-    let isSubscribed = true;
-    let errorCount = 0;
-    const MAX_ERRORS = 3;
-    const ERROR_RESET_TIME = 60000; // 1分钟后重置错误计数
-
-    const fetchSystemMetrics = async () => {
-      try {
-        const response = await fetch('/api/proxy-stats/system')
-        if (!response.ok) throw new Error('System metrics API returned non-200 status')
-        
-        const data = await response.json()
-        if (!isSubscribed) return;
-        
-        if (typeof data.cpuUsage === 'number' && !isNaN(data.cpuUsage)) {
-          setSystemMetrics(data)
-          setSystemMetricsCache(data)
-          errorCount = 0
-        }
-      } catch (error) {
-        console.warn('Failed to fetch system metrics:', error)
-        if (!isSubscribed) return;
-        
-        errorCount++
-        if (errorCount >= MAX_ERRORS) {
-          console.error('Max system metrics errors reached, stopping requests')
+        if (cachedData) {
+          setOverviewData(cachedData)
           return
         }
-        
-        if (systemMetricsCache) {
-          setSystemMetrics(systemMetricsCache)
+      }
+
+      const [overviewResponse, serversResponse, systemResponse] = await Promise.all([
+        fetch('/api/proxy-stats?type=overview').catch(() => ({ ok: false } as Response)),
+        fetch('/api/proxy-stats/servers').catch(() => ({ ok: false } as Response)),
+        fetch('/api/proxy-stats/system').catch(() => ({ ok: false } as Response))
+      ])
+
+      if (!overviewResponse.ok || !serversResponse.ok || !systemResponse.ok) {
+        setErrorCount(prev => prev + 1)
+        const cachedData = getOverviewCache()
+        if (cachedData) {
+          setOverviewData(cachedData)
         }
+        return
+      }
+
+      setErrorCount(0)
+
+      try {
+        const [overviewData, serversData, systemData] = await Promise.all([
+          overviewResponse.json(),
+          serversResponse.json(),
+          systemResponse.json()
+        ])
+
+        // 设置概览数据，确保 totalConnections 被正确设置
+        if (overviewData) {
+          // 计算总连接数
+          let totalConns = 0
+          if (typeof overviewData.totalConnections === 'number') {
+            totalConns = overviewData.totalConnections
+          } else if (Array.isArray(serversData)) {
+            // 如果 totalConnections 不存在，尝试从服务器数据中计算
+            totalConns = serversData.reduce((sum, server) => {
+              return sum + (server.metrics?.connections || 0)
+            }, 0)
+          }
+
+          const newOverviewData = {
+            totalProxies: overviewData.totalProxies || 0,
+            activeProxies: overviewData.activeProxies || 0,
+            totalTraffic: formatTotalBytes(overviewData.totalTraffic || 0),
+            totalConnections: overviewData.totalConnections || 0
+          }
+
+          setOverviewData(newOverviewData)
+          setOverviewCache(newOverviewData)
+        }
+        
+        if (serversData && Array.isArray(serversData)) {
+          setServers(serversData)
+          if (serversData.length > 0 && !selectedServer) {
+            setSelectedServer(serversData[0].domain)
+          }
+        }
+        
+        if (systemData && typeof systemData.cpuUsage === 'number') {
+          const newSystemMetrics = {
+            cpuUsage: systemData.cpuUsage || 0,
+            memoryPercentage: systemData.memoryPercentage || 0,
+            diskUsage: systemData.diskUsage || 0
+          }
+          setSystemMetrics(newSystemMetrics)
+          setSystemMetricsCache(systemData)
+        }
+      } catch (parseError) {
+        console.error('Error parsing response:', parseError)
+        setErrorCount(prev => prev + 1)
+        const cachedData = getOverviewCache()
+        if (cachedData) {
+          setOverviewData(cachedData)
+        }
+      }
+    } catch (error) {
+      setErrorCount(prev => prev + 1)
+      const cachedData = getOverviewCache()
+      if (cachedData) {
+        setOverviewData(cachedData)
+      }
+    }
+  }, [errorCount])
+
+  // 添加错误计数重置定时器
+  useEffect(() => {
+    const resetErrorCount = () => {
+      if (errorCount > 0) {
+        setErrorCount(0)
       }
     }
 
-    fetchSystemMetrics()
-    const interval = setInterval(fetchSystemMetrics, 5000)
-    const errorResetInterval = setInterval(() => {
-      errorCount = 0
-    }, ERROR_RESET_TIME)
-    
-    return () => {
-      isSubscribed = false
-      clearInterval(interval)
-      clearInterval(errorResetInterval)
-    }
-  }, [])
+    const intervalId = setInterval(resetErrorCount, 60000) // 每分钟重置错误计数
+    return () => clearInterval(intervalId)
+  }, [errorCount])
 
-  // 获取趋势数据
+  // 修改首次加载的 effect
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false
+      const initialLoad = async () => {
+        try {
+          await handleRefresh()
+        } finally {
+          setIsInitialLoading(false)
+        }
+      }
+      initialLoad()
+    }
+  }, [handleRefresh])
+
+  // 修改路由监听的 useEffect
+  useEffect(() => {
+    const shouldRefresh = pathname === '/dashboard' || pathname === '/'
+    if (shouldRefresh) {
+      handleRefresh()
+    }
+  }, [pathname, handleRefresh])
+
+  // 添加自动刷新
+  useEffect(() => {
+    // 首次加载立即刷新
+    handleRefresh()
+    
+    const intervalId = setInterval(() => {
+      handleRefresh()
+    }, 8000) // 改为8秒，确保大于最小请求间隔
+    
+    return () => clearInterval(intervalId)
+  }, [handleRefresh])
+
+  // 保持趋势数据获取的逻辑不变
   useEffect(() => {
     const fetchTrendData = async () => {
       try {
@@ -420,7 +421,6 @@ export default function Dashboard() {
         if (!response.ok) throw new Error('Failed to fetch trend data')
         const data = await response.json()
         
-        // 确保数据是按时间排序的
         const sortedData = data.sort((a: TrendDataPoint, b: TrendDataPoint) => 
           new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
         )
@@ -432,64 +432,9 @@ export default function Dashboard() {
     }
 
     fetchTrendData()
-    // 更频繁地更新数据
-    const intervalId = setInterval(fetchTrendData, 30000) // 每30秒更新一次
+    const intervalId = setInterval(fetchTrendData, 30000)
     return () => clearInterval(intervalId)
   }, [timeRange])
-
-  // 手动刷新函数
-  const handleRefresh = useCallback(async () => {
-    setIsLoading(true)
-    try {
-      const [overviewResponse, serversResponse, systemResponse] = await Promise.all([
-        fetch('/api/proxy-stats?type=overview'),
-        fetch('/api/proxy-stats/servers'),
-        fetch('/api/proxy-stats/system')
-      ])
-
-      const [overviewData, serversData, systemData] = await Promise.all([
-        overviewResponse.json(),
-        serversResponse.json(),
-        systemResponse.json()
-      ])
-
-      const formatTrafficBytes = (bytes: number, decimals: number = 2): string => {
-        if (bytes === 0) return '0 B'
-        const k = 1024
-        const dm = decimals < 0 ? 0 : decimals
-        const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-        const i = Math.floor(Math.log(bytes) / Math.log(k))
-        return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
-      }
-
-      const newOverviewData = {
-        totalProxies: overviewData.totalProxies,
-        activeProxies: overviewData.activeProxies,
-        totalTraffic: formatTrafficBytes(overviewData.totalTraffic),
-        totalConnections: overviewData.totalConnections
-      }
-
-      setOverviewData(newOverviewData)
-      setOverviewCache(newOverviewData)
-      
-      if (Array.isArray(serversData)) {
-        setServers(serversData)
-      }
-      
-      if (typeof systemData.cpuUsage === 'number' && !isNaN(systemData.cpuUsage)) {
-        setSystemMetrics(systemData)
-        setSystemMetricsCache(systemData)
-      }
-    } catch (error) {
-      console.error('Failed to refresh data:', error)
-      const cachedData = getOverviewCache()
-      if (cachedData) {
-        setOverviewData(cachedData)
-      }
-    } finally {
-      setIsLoading(false)
-    }
-  }, [])
 
   const handleAddServer = () => {
     // This is a placeholder function. In a real application, this would open a form to add a new server.
@@ -507,7 +452,7 @@ export default function Dashboard() {
       
       {/* Overview Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {isLoading ? (
+        {isInitialLoading ? (
           <Card className="col-span-full flex items-center justify-center h-[150px]">
             <div className="flex flex-col items-center gap-2">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -618,7 +563,7 @@ export default function Dashboard() {
         </CardHeader>
         <CardContent>
           <div className="h-[300px]">
-            {isLoading ? (
+            {isInitialLoading ? (
               <div className="flex items-center justify-center h-full">
                 <div className="flex flex-col items-center gap-2">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -749,7 +694,7 @@ export default function Dashboard() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
+          {isInitialLoading ? (
             <div className="flex items-center justify-center h-[150px]">
               <div className="flex flex-col items-center gap-2">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
