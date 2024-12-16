@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useTranslation } from 'react-i18next'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -218,9 +218,8 @@ const formatBytes = (bytes: number, decimals: number = 2): string => {
 
 export default function Dashboard() {
   const { t } = useTranslation()
-  const [isLoading, setIsLoading] = useState(true)  // 添加加载状态
+  const [isLoading, setIsLoading] = useState(true)
   const [overviewData, setOverviewData] = useState<OverviewData>(() => {
-    // 初始化时尝试从缓存获取数据
     return getOverviewCache() || {
       totalProxies: 0,
       activeProxies: 0,
@@ -239,125 +238,179 @@ export default function Dashboard() {
     diskUsage: 0
   })
   const [trendData, setTrendData] = useState<TrendDataPoint[]>([])
-  const [systemMetricsCache, setSystemMetricsCache] = useState<SystemMetrics | null>(null);
-  const [systemMetricsError, setSystemMetricsError] = useState(0);
-  const [lastErrorTime, setLastErrorTime] = useState(0);
+  const [systemMetricsCache, setSystemMetricsCache] = useState<SystemMetrics | null>(null)
+  const [systemMetricsError, setSystemMetricsError] = useState(0)
+  const [lastErrorTime, setLastErrorTime] = useState(0)
 
-  // 获取概览数据
-  const fetchOverviewData = async () => {
-    try {
-      const response = await fetch('/api/proxy-stats?type=overview')
-      const data = await response.json()
-      const formatTrafficBytes = (bytes: number, decimals: number = 2): string => {
-        if (bytes === 0) return '0 B'
-        const k = 1024
-        const dm = decimals < 0 ? 0 : decimals
-        const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-        const i = Math.floor(Math.log(bytes) / Math.log(k))
-        return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
-      }
+  // 修改过滤逻辑，添加类型保护
+  const filteredServers = Array.isArray(servers) ? servers.filter(server => {
+    if (!server) return false;
+    const domainMatch = server.name?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false;
+    const tagsMatch = Array.isArray(server.tags) && server.tags.some(tag => 
+      tag?.value?.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+    return domainMatch || tagsMatch;
+  }) : [];
 
-      const newData = {
-        totalProxies: data.totalProxies,
-        activeProxies: data.activeProxies,
-        totalTraffic: formatTrafficBytes(data.totalTraffic),
-        totalConnections: data.totalConnections
-      }
+  // 优化 useEffect 的依赖和清理
+  useEffect(() => {
+    let isSubscribed = true;
 
-      setOverviewData(newData)
-      setOverviewCache(newData)
-      setIsLoading(false)  // 数据加载完成
-    } catch (error) {
-      console.error('Failed to fetch overview data:', error)
-      // 如果有缓存数据，保持使用缓存数据
-      const cachedData = getOverviewCache()
-      if (!cachedData) {
-        setIsLoading(true)  // 如果没有缓存数据，显示加载状态
+    const fetchOverviewData = async () => {
+      try {
+        const response = await fetch('/api/proxy-stats?type=overview')
+        const data = await response.json()
+        if (!isSubscribed) return;
+        
+        const formatTrafficBytes = (bytes: number, decimals: number = 2): string => {
+          if (bytes === 0) return '0 B'
+          const k = 1024
+          const dm = decimals < 0 ? 0 : decimals
+          const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+          const i = Math.floor(Math.log(bytes) / Math.log(k))
+          return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
+        }
+
+        const newData = {
+          totalProxies: data.totalProxies,
+          activeProxies: data.activeProxies,
+          totalTraffic: formatTrafficBytes(data.totalTraffic),
+          totalConnections: data.totalConnections
+        }
+
+        setOverviewData(newData)
+        setOverviewCache(newData)
+        setIsLoading(false)
+      } catch (error) {
+        console.error('Failed to fetch overview data:', error)
+        if (!isSubscribed) return;
+        const cachedData = getOverviewCache()
+        if (!cachedData) {
+          setIsLoading(true)
+        }
       }
     }
-  }
 
-  // 自动刷新
-  useEffect(() => {
     fetchOverviewData()
-    const interval = setInterval(fetchOverviewData, 5000) // 每5秒刷新一���
-    return () => clearInterval(interval)
+    const interval = setInterval(fetchOverviewData, 5000)
+    
+    return () => {
+      isSubscribed = false
+      clearInterval(interval)
+    }
   }, [])
 
-  // 获取服务器列表
+  // 优化服务器列表获取
   useEffect(() => {
+    let isSubscribed = true;
+
     const fetchServers = async () => {
       try {
         const response = await fetch('/api/proxy-stats/servers')
         const data = await response.json()
-        setServers(data)
-        if (data.length > 0 && !selectedServer) {
-          setSelectedServer(data[0].domain)
+        if (!isSubscribed) return;
+        
+        if (Array.isArray(data)) {
+          setServers(data)
+          if (data.length > 0 && !selectedServer) {
+            setSelectedServer(data[0].domain)
+          }
+        } else {
+          console.error('Server data is not an array:', data)
+          setServers([])
         }
       } catch (error) {
         console.error('Failed to fetch servers:', error)
+        if (!isSubscribed) return;
+        setServers([])
       }
     }
 
     fetchServers()
     const interval = setInterval(fetchServers, 10000)
-    return () => clearInterval(interval)
-  }, [])
+    
+    return () => {
+      isSubscribed = false
+      clearInterval(interval)
+    }
+  }, [selectedServer])
 
-  // 获取历史数据
+  // 优化历史数据获取
   useEffect(() => {
-    if (!selectedServer) return
+    if (!selectedServer) return;
+    
+    let isSubscribed = true;
 
     const fetchHistory = async () => {
       try {
         const response = await fetch(`/api/proxy-stats/history?domain=${selectedServer}&range=${timeRange}`)
         const data = await response.json()
-        setHistoryData(data.metrics)
+        if (!isSubscribed) return;
+        setHistoryData(data.metrics || [])
       } catch (error) {
         console.error('Failed to fetch history:', error)
+        if (!isSubscribed) return;
+        setHistoryData([])
       }
     }
 
     fetchHistory()
     const interval = setInterval(fetchHistory, 10000)
-    return () => clearInterval(interval)
+    
+    return () => {
+      isSubscribed = false
+      clearInterval(interval)
+    }
   }, [selectedServer, timeRange])
 
-  // 获取系统指标
+  // 优化系统指标获取
   useEffect(() => {
+    let isSubscribed = true;
+    let errorCount = 0;
+    const MAX_ERRORS = 3;
+    const ERROR_RESET_TIME = 60000; // 1分钟后重置错误计数
+
     const fetchSystemMetrics = async () => {
       try {
-        const response = await fetch('/api/proxy-stats/system');
+        const response = await fetch('/api/proxy-stats/system')
+        if (!response.ok) throw new Error('System metrics API returned non-200 status')
         
-        if (!response.ok) {
-          console.warn('System metrics API returned non-200 status');
-          return;
-        }
+        const data = await response.json()
+        if (!isSubscribed) return;
         
-        const data = await response.json();
-        
-        // 验证数据有效性
         if (typeof data.cpuUsage === 'number' && !isNaN(data.cpuUsage)) {
-          setSystemMetrics(data);
-          setSystemMetricsCache(data);
+          setSystemMetrics(data)
+          setSystemMetricsCache(data)
+          errorCount = 0
         }
       } catch (error) {
-        console.warn('Failed to fetch system metrics:', error);
-        // 发生错误时使用缓存数据
+        console.warn('Failed to fetch system metrics:', error)
+        if (!isSubscribed) return;
+        
+        errorCount++
+        if (errorCount >= MAX_ERRORS) {
+          console.error('Max system metrics errors reached, stopping requests')
+          return
+        }
+        
         if (systemMetricsCache) {
-          setSystemMetrics(systemMetricsCache);
+          setSystemMetrics(systemMetricsCache)
         }
       }
-    };
+    }
 
-    // 初始加载
-    fetchSystemMetrics();
+    fetchSystemMetrics()
+    const interval = setInterval(fetchSystemMetrics, 5000)
+    const errorResetInterval = setInterval(() => {
+      errorCount = 0
+    }, ERROR_RESET_TIME)
     
-    // 固定5秒的刷新间隔
-    const interval = setInterval(fetchSystemMetrics, 5000);
-    
-    return () => clearInterval(interval);
-  }, []); // 移除所有依赖项
+    return () => {
+      isSubscribed = false
+      clearInterval(interval)
+      clearInterval(errorResetInterval)
+    }
+  }, [])
 
   // 获取趋势数据
   useEffect(() => {
@@ -384,18 +437,59 @@ export default function Dashboard() {
     return () => clearInterval(intervalId)
   }, [timeRange])
 
-  const filteredServers = servers?.filter(server => {
-    const domainMatch = server.name?.toLowerCase().includes(searchQuery.toLowerCase());
-    const tagsMatch = server.tags?.some(tag => 
-      tag.value?.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-    return domainMatch || tagsMatch;
-  }) ?? [];
+  // 手动刷新函数
+  const handleRefresh = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const [overviewResponse, serversResponse, systemResponse] = await Promise.all([
+        fetch('/api/proxy-stats?type=overview'),
+        fetch('/api/proxy-stats/servers'),
+        fetch('/api/proxy-stats/system')
+      ])
 
-  // 手动刷新
-  const handleRefresh = () => {
-    fetchOverviewData()
-  }
+      const [overviewData, serversData, systemData] = await Promise.all([
+        overviewResponse.json(),
+        serversResponse.json(),
+        systemResponse.json()
+      ])
+
+      const formatTrafficBytes = (bytes: number, decimals: number = 2): string => {
+        if (bytes === 0) return '0 B'
+        const k = 1024
+        const dm = decimals < 0 ? 0 : decimals
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+        const i = Math.floor(Math.log(bytes) / Math.log(k))
+        return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
+      }
+
+      const newOverviewData = {
+        totalProxies: overviewData.totalProxies,
+        activeProxies: overviewData.activeProxies,
+        totalTraffic: formatTrafficBytes(overviewData.totalTraffic),
+        totalConnections: overviewData.totalConnections
+      }
+
+      setOverviewData(newOverviewData)
+      setOverviewCache(newOverviewData)
+      
+      if (Array.isArray(serversData)) {
+        setServers(serversData)
+      }
+      
+      if (typeof systemData.cpuUsage === 'number' && !isNaN(systemData.cpuUsage)) {
+        setSystemMetrics(systemData)
+        setSystemMetricsCache(systemData)
+      }
+    } catch (error) {
+      console.error('Failed to refresh data:', error)
+      const cachedData = getOverviewCache()
+      if (cachedData) {
+        setOverviewData(cachedData)
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
 
   const handleAddServer = () => {
     // This is a placeholder function. In a real application, this would open a form to add a new server.

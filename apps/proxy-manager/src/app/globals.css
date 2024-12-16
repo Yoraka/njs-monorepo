@@ -9,56 +9,52 @@ body {
 @layer base {
   :root {
     --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
+    --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
+    --card-foreground: 240 10% 3.9%;
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
     --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
-    --chart-1: 12 76% 61%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5.9% 10%;
     --radius: 0.5rem;
+    --shadow-color: 0 0% 0%;
+    --shadow-strength: 2%;
   }
+
   .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
+    --background: 0 0% 3%;
+    --foreground: 0 0% 85%;
+    --card: 0 0% 5%;
+    --card-foreground: 0 0% 85%;
+    --popover: 0 0% 5%;
+    --popover-foreground: 0 0% 85%;
     --primary: 0 0% 98%;
     --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
+    --secondary: 0 0% 9%;
+    --secondary-foreground: 0 0% 85%;
+    --muted: 0 0% 9%;
+    --muted-foreground: 0 0% 60%;
+    --accent: 0 0% 9%;
+    --accent-foreground: 0 0% 85%;
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 0 0% 85%;
+    --border: 0 0% 9%;
+    --input: 0 0% 9%;
+    --ring: 0 0% 9%;
+    --radius: 0.5rem;
+    --shadow-color: 220 40% 2%;
+    --shadow-strength: 45%;
   }
 }
 
@@ -68,5 +64,376 @@ body {
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* 通用卡片样式 */
+.dark .bg-white,
+.dark .bg-card,
+.dark [class*="bg-white"],
+.dark .rounded-lg.border {
+  background-color: hsl(0 0% 5%);
+  border-color: hsl(0 0% 9%);
+  box-shadow: 
+    0 2px 4px -2px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 5%)),
+    0 4px 6px -1px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 3%)),
+    0 -1px 0 0 hsl(0 0% 0% / 10%) inset,
+    0 1px 0 0 hsl(0 0% 100% / 5%) inset;
+  background-image: linear-gradient(
+    to bottom,
+    hsl(0 0% 100% / 2%) 0%,
+    hsl(0 0% 100% / 0%) 100%
+  );
+  transition: all 0.2s ease-in-out;
+}
+
+/* 卡片悬停效果 */
+.dark .bg-white:hover,
+.dark .bg-card:hover,
+.dark [class*="bg-white"]:hover,
+.dark .rounded-lg.border:hover {
+  background-color: hsl(0 0% 6%);
+  box-shadow: 
+    0 12px 20px -3px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 8%)),
+    0 6px 8px -4px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 5%)),
+    0 -1px 0 0 hsl(0 0% 0% / 15%) inset,
+    0 1px 0 0 hsl(0 0% 100% / 7%) inset;
+  transform: translateY(-1px);
+}
+
+/* 次要背景色 */
+.dark .bg-gray-50,
+.dark .bg-gray-100 {
+  background-color: hsl(0 0% 4%);
+  box-shadow: 
+    0 -1px 0 0 hsl(0 0% 0% / 8%) inset,
+    0 1px 0 0 hsl(0 0% 100% / 3%) inset;
+}
+
+/* 边框颜色 */
+.dark .border-gray-100,
+.dark .border-gray-200 {
+  border-color: hsl(0 0% 9%);
+}
+
+/* 文本颜色 */
+.dark .text-gray-500 {
+  color: hsl(0 0% 55%);
+}
+
+.dark .text-gray-600 {
+  color: hsl(0 0% 65%);
+}
+
+.dark .text-gray-700 {
+  color: hsl(0 0% 85%);
+}
+
+/* 标签和说明文字 */
+.dark label,
+.dark .text-sm {
+  color: hsl(0 0% 65%);
+}
+
+.dark .text-muted-foreground {
+  color: hsl(0 0% 55%);
+}
+
+/* 输入框样式 */
+.dark .form-input,
+.dark input[type="text"],
+.dark input[type="number"],
+.dark select {
+  background-color: hsl(0 0% 7%);
+  border-color: hsl(0 0% 9%);
+  color: hsl(0 0% 85%);
+  box-shadow: 
+    inset 0 1px 1px hsl(0 0% 0% / 10%),
+    0 1px 0 hsl(0 0% 100% / 3%);
+}
+
+.dark input::placeholder {
+  color: hsl(0 0% 45%);
+}
+
+/* 弹出层样式 */
+.dark [data-radix-popper-content-wrapper] {
+  background-color: hsl(0 0% 5%);
+  border-color: hsl(0 0% 9%);
+  box-shadow: 
+    0 12px 20px -3px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 8%)),
+    0 6px 8px -4px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 5%)),
+    0 -1px 0 0 hsl(0 0% 0% / 10%) inset,
+    0 1px 0 0 hsl(0 0% 100% / 5%) inset;
+}
+
+/* 按钮样式 */
+.dark .button,
+.dark [class*="button"] {
+  background-image: linear-gradient(
+    to bottom,
+    hsl(0 0% 100% / 3%) 0%,
+    hsl(0 0% 100% / 0%) 100%
+  );
+  box-shadow: 
+    0 1px 2px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 3%)),
+    0 -1px 0 0 hsl(0 0% 0% / 8%) inset,
+    0 1px 0 0 hsl(0 0% 100% / 5%) inset;
+}
+
+/* 白色按钮样式覆盖 */
+.dark button[class*="bg-white"],
+.dark a[class*="bg-white"],
+.dark div[class*="bg-white"][role="button"] {
+  --tw-bg-opacity: 1;
+  background-color: hsl(0 0% 100% / var(--tw-bg-opacity));
+  --tw-text-opacity: 1;
+  color: hsl(0 0% 9% / var(--tw-text-opacity));
+  box-shadow: 
+    0 1px 2px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 3%)),
+    0 -1px 0 0 hsl(0 0% 0% / 8%) inset,
+    0 1px 0 0 hsl(0 0% 100% / 5%) inset;
+}
+
+/* 白色按钮悬停效果 */
+.dark button[class*="bg-white"]:hover,
+.dark a[class*="bg-white"]:hover,
+.dark div[class*="bg-white"][role="button"]:hover {
+  --tw-bg-opacity: 0.9;
+  background-color: hsl(0 0% 100% / var(--tw-bg-opacity));
+}
+
+/* 状态指示灯样式 */
+.status-indicator {
+  @apply relative inline-block w-2.5 h-2.5 rounded-full;
+}
+
+/* 亮色模式保持原样 */
+.status-indicator.active {
+  @apply bg-green-500;
+  box-shadow: 
+    0 0 0 2px rgba(34, 197, 94, 0.2),
+    0 0 4px 2px rgba(34, 197, 94, 0.3);
+}
+
+.status-indicator.inactive {
+  @apply bg-gray-400;
+  box-shadow: 
+    0 0 0 2px rgba(156, 163, 175, 0.2),
+    0 0 4px 2px rgba(156, 163, 175, 0.1);
+}
+
+.status-indicator.error {
+  @apply bg-red-500;
+  box-shadow: 
+    0 0 0 2px rgba(239, 68, 68, 0.2),
+    0 0 4px 2px rgba(239, 68, 68, 0.3);
+}
+
+/* 深色模式简化样式 */
+.dark .status-indicator.active {
+  background-color: hsl(142 70% 45%);
+  box-shadow: none;
+}
+
+.dark .status-indicator.inactive {
+  background-color: hsl(0 0% 25%);
+  box-shadow: none;
+}
+
+.dark .status-indicator.error {
+  background-color: hsl(0 85% 60%);
+  box-shadow: none;
+}
+
+/* 导航栏样式 */
+.nav-item {
+  @apply px-4 py-2 rounded-md transition-colors;
+  background-image: linear-gradient(
+    to bottom,
+    hsl(0 0% 100% / 2%) 0%,
+    hsl(0 0% 100% / 0%) 100%
+  );
+}
+
+.dark .nav-item:hover {
+  background-color: hsl(0 0% 7%);
+  box-shadow: 
+    inset 0 1px 0 0 hsl(0 0% 100% / 3%);
+}
+
+.dark .nav-item.active {
+  background-color: hsl(0 0% 9%);
+  box-shadow: 
+    0 1px 2px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 5%)),
+    inset 0 1px 0 0 hsl(0 0% 100% / 5%);
+}
+
+/* 白色按钮文字颜色 */
+.dark .bg-white.button,
+.dark .bg-white[class*="button"],
+.dark [class*="bg-white"].button,
+.dark [class*="bg-white"][class*="button"] {
+  color: hsl(0 0% 9%);
+}
+
+/* 持其他白色背景元素的样式不变 */
+.dark .bg-white:not(.button):not([class*="button"]),
+.dark [class*="bg-white"]:not(.button):not([class*="button"]) {
+  background-color: hsl(0 0% 5%);
+  border-color: hsl(0 0% 9%);
+  box-shadow: 
+    0 2px 4px -2px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 5%)),
+    0 4px 6px -1px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 3%)),
+    0 -1px 0 0 hsl(0 0% 0% / 10%) inset,
+    0 1px 0 0 hsl(0 0% 100% / 5%) inset;
+  background-image: linear-gradient(
+    to bottom,
+    hsl(0 0% 100% / 2%) 0%,
+    hsl(0 0% 100% / 0%) 100%
+  );
+}
+
+/* 特殊处理某些需要保持原色的文字 */
+.dark .bg-white [class*="text-gray"],
+.dark [class*="bg-white"] [class*="text-gray"],
+.dark .bg-white [class*="text-muted"],
+.dark [class*="bg-white"] [class*="text-muted"] {
+  color: var(--muted-foreground);
+}
+
+/* Primary 按钮样式 */
+.dark .bg-primary {
+  background-color: hsl(0 0% 98%);
+  color: hsl(0 0% 9%);
+  box-shadow: 
+    0 1px 2px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 3%)),
+    0 -1px 0 0 hsl(0 0% 0% / 8%) inset,
+    0 1px 0 0 hsl(0 0% 100% / 5%) inset;
+}
+
+.dark .bg-primary:hover {
+  background-color: hsl(0 0% 95%);
+}
+
+/* 开关按钮样式 */
+.dark [role="switch"][data-state] {
+  background-color: hsl(0 0% 7%);
+  border: 1px solid hsl(0 0% 12%);
+  box-shadow: 
+    inset 0 1px 2px hsl(0 0% 0% / 20%),
+    inset 0 2px 4px hsl(0 0% 0% / 10%),
+    0 1px 0 0 hsl(0 0% 100% / 5%);
+  transition: all 0.15s ease;
+}
+
+.dark [role="switch"][data-state="checked"] {
+  background-color: hsl(0 0% 18%);
+  border-color: hsl(0 0% 22%);
+  box-shadow: 
+    inset 0 1px 2px hsl(0 0% 0% / 15%),
+    inset 0 2px 4px hsl(0 0% 0% / 8%),
+    0 1px 0 0 hsl(0 0% 100% / 3%);
+}
+
+/* 开关按钮的圆形滑块 */
+.dark [role="switch"][data-state] span {
+  background: linear-gradient(180deg, 
+    hsl(0 0% 28%) 0%,
+    hsl(0 0% 22%) 100%
+  );
+  box-shadow: 
+    0 1px 2px hsl(0 0% 0% / 30%),
+    inset 0 1px 0 0 hsl(0 0% 100% / 15%),
+    inset 0 -1px 0 0 hsl(0 0% 0% / 15%);
+  border: 1px solid hsl(0 0% 18%);
+  transition: all 0.15s ease;
+}
+
+/* 开关按钮悬停效果 */
+.dark [role="switch"][data-state]:hover span {
+  background: linear-gradient(180deg, 
+    hsl(0 0% 32%) 0%,
+    hsl(0 0% 26%) 100%
+  );
+}
+
+/* 开关按钮激活状态 */
+.dark [role="switch"][data-state]:active span {
+  background: linear-gradient(180deg, 
+    hsl(0 0% 22%) 0%,
+    hsl(0 0% 18%) 100%
+  );
+  box-shadow: 
+    0 1px 2px hsl(0 0% 0% / 40%),
+    inset 0 1px 0 0 hsl(0 0% 100% / 10%),
+    inset 0 -1px 0 0 hsl(0 0% 0% / 20%);
+}
+
+/* 开关按钮选中状态的滑块 */
+.dark [role="switch"][data-state="checked"] span {
+  background: linear-gradient(180deg, 
+    hsl(0 0% 95%) 0%,
+    hsl(0 0% 85%) 40%,
+    hsl(0 0% 78%) 100%
+  );
+  border: 1px solid hsl(0 0% 70%);
+  box-shadow: 
+    0 1px 2px hsl(0 0% 0% / 15%),
+    inset 0 1px 1px hsl(0 0% 100% / 60%),
+    inset 0 -1px 1px hsl(0 0% 75% / 30%);
+}
+
+/* 开关按钮选中状态悬停效果 */
+.dark [role="switch"][data-state="checked"]:hover span {
+  background: linear-gradient(180deg, 
+    hsl(0 0% 98%) 0%,
+    hsl(0 0% 88%) 40%,
+    hsl(0 0% 80%) 100%
+  );
+}
+
+/* 开关按钮选中状态激活效果 */
+.dark [role="switch"][data-state="checked"]:active span {
+  background: linear-gradient(180deg, 
+    hsl(0 0% 92%) 0%,
+    hsl(0 0% 82%) 40%,
+    hsl(0 0% 75%) 100%
+  );
+  box-shadow: 
+    0 1px 2px hsl(0 0% 0% / 20%),
+    inset 0 1px 1px hsl(0 0% 100% / 50%),
+    inset 0 -1px 1px hsl(0 0% 75% / 25%);
+}
+
+/* 状态指示器基础样式 */
+.dark .flex.items-center.gap-2.rounded-full.bg-emerald-50 {
+  background-color: hsl(0 0% 7%);
+  border: 1px solid hsl(0 0% 12%);
+}
+
+/* 状态指示器文字颜色 */
+.dark .text-emerald-700 {
+  color: hsl(0 0% 65%);
+}
+
+/* 状态指示器的点 */
+.dark .bg-emerald-500 {
+  background-color: hsl(142 70% 45%);
+  width: 0.5rem;
+  height: 0.5rem;
+}
+
+/* 保持动画效果 */
+.dark .animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
   }
 }
