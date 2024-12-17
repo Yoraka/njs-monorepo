@@ -1,4 +1,4 @@
-import { ServerConfig, ValidationResult } from '@/types/proxy-config';
+import { ServerConfig, ValidationResult, JsonConfig } from '@/types/proxy-config';
 import { getWebSocketClient } from './ws-client';
 
 export enum ConfigStatus {
@@ -29,10 +29,24 @@ export class ConfigService {
   };
 
   // 配置管理
-  public async updateConfig(config: ServerConfig): Promise<void> {
+  public async updateConfig(serverConfig: ServerConfig): Promise<void> {
     try {
       this.configStatus.status = ConfigStatus.SAVING;
-      await this.wsClient.sendConfigUpdate(config);
+      
+      // 获取当前完整配置
+      const currentConfig = await this.wsClient.getCurrentConfig();
+      
+      // 更新服务器配置
+      const updatedConfig: JsonConfig = {
+        ...currentConfig,
+        servers: currentConfig.servers.map(server => 
+          server.name === serverConfig.name ? serverConfig : server
+        )
+      };
+
+      // 发送更新后的完整配置
+      await this.wsClient.sendConfigUpdate(updatedConfig);
+      
       this.configStatus.lastUpdate = Date.now();
       this.configStatus.status = ConfigStatus.SAVED;
       this.configStatus.error = undefined;
@@ -89,6 +103,17 @@ export class ConfigService {
       return await this.wsClient.getServiceStatus();
     } catch (error) {
       throw new Error(`Failed to get service status: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  // 获取配置
+  public async getConfig(): Promise<JsonConfig> {
+    try {
+      return await this.wsClient.getCurrentConfig();
+    } catch (error) {
+      this.configStatus.status = ConfigStatus.ERROR;
+      this.configStatus.error = error instanceof Error ? error.message : 'Unknown error';
+      throw error;
     }
   }
 }

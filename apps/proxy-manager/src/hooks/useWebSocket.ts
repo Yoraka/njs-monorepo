@@ -1,89 +1,113 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getWebSocketClient } from '@/services/ws-client';
-import { getConfigService } from '@/services/config-service';
-import { ServerConfig } from '@/types/proxy-config';
-import { ConfigStatus, ConfigStatusInfo } from '@/services/config-service';
+import { JsonConfig, ServerConfig } from '@/types/proxy-config';
+import { ConfigStatus } from '@/services/config-service';
 
-export type StatusCallback = (status: ConfigStatus) => void;
-export type ErrorCallback = (error: Error) => void;
+export interface UseWebSocketReturn {
+  isConnected: boolean;
+  error: Error | null;
+  configStatus: ConfigStatus;
+  updateConfig: (config: JsonConfig) => Promise<void>;
+  uploadFile: (file: File, type: 'cert' | 'key' | 'other') => Promise<void>;
+  subscribeToStatus: (callback: (status: ConfigStatus) => void) => () => void;
+  subscribeToErrors: (callback: (error: Error) => void) => () => void;
+  getConfig: () => Promise<JsonConfig>;
+}
 
-export function useWebSocket() {
-  const wsClient = getWebSocketClient();
-  const configService = getConfigService();
-  
+export function useWebSocket(): UseWebSocketReturn {
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [configStatus, setConfigStatus] = useState<ConfigStatus>(ConfigStatus.SAVED);
+  const wsClient = getWebSocketClient();
 
   useEffect(() => {
+    const status = wsClient.getStatus();
+    setIsConnected(status.connectionState === 'connected');
+
     const handleConnect = () => {
+      console.log('Debug - WebSocket 已连接');
       setIsConnected(true);
       setError(null);
     };
 
-    const handleError = (error: Error) => {
-      setError(error);
+    const handleDisconnect = () => {
+      console.log('Debug - WebSocket 已断开');
       setIsConnected(false);
     };
 
-    wsClient.on('connected', handleConnect);
-    wsClient.on('error', handleError);
+    const handleError = (err: Error) => {
+      console.error('Debug - WebSocket 错误:', err);
+      setError(err);
+      setIsConnected(false);
+    };
 
-    // 初始状态设置
-    setIsConnected(wsClient.ws?.readyState === WebSocket.OPEN);
+    const handleStateChange = (state: string) => {
+      console.log('Debug - WebSocket 状态变更:', state);
+      setIsConnected(state === 'connected');
+    };
+
+    wsClient.on('connected', handleConnect);
+    wsClient.on('disconnected', handleDisconnect);
+    wsClient.on('error', handleError);
+    wsClient.on('stateChange', handleStateChange);
+
+    if (status.connectionState === 'connected') {
+      handleConnect();
+    }
 
     return () => {
       wsClient.off('connected', handleConnect);
+      wsClient.off('disconnected', handleDisconnect);
       wsClient.off('error', handleError);
+      wsClient.off('stateChange', handleStateChange);
     };
   }, []);
 
-  // 配置更新方法
-  const updateConfig = useCallback(async (config: ServerConfig): Promise<void> => {
+  const updateConfig = useCallback(async (config: JsonConfig) => {
     try {
       setConfigStatus(ConfigStatus.SAVING);
-      await configService.updateConfig(config);
+      await wsClient.sendConfigUpdate(config);
       setConfigStatus(ConfigStatus.SAVED);
-    } catch (error) {
+    } catch (err) {
       setConfigStatus(ConfigStatus.ERROR);
-      throw error;
+      throw err;
     }
   }, []);
 
-  // 文件上传方法
-  const uploadFile = useCallback(async (file: File, type: 'cert' | 'key' | 'other'): Promise<void> => {
+  const uploadFile = useCallback(async (file: File, type: 'cert' | 'key' | 'other') => {
+    const reader = new FileReader();
+    return new Promise<void>((resolve, reject) => {
+      reader.onload = async () => {
+        try {
+          const content = reader.result as string;
+          await wsClient.sendFileUpload(file.name, content, type);
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(file);
+    });
+  }, []);
+
+  const getConfig = useCallback(async () => {
     try {
-      const content = await readFileAsText(file);
-      if (type === 'cert' || type === 'key') {
-        const path = type === 'cert' ? '/certs/server.crt' : '/certs/server.key';
-        await configService.saveFile(path, content);
-      } else {
-        await configService.saveFile(`/uploads/${file.name}`, content);
-      }
-    } catch (error) {
-      setError(error instanceof Error ? error : new Error(String(error)));
-      throw error;
+      return await wsClient.getCurrentConfig();
+    } catch (err) {
+      setError(err as Error);
+      throw err;
     }
   }, []);
 
-  // 状态订阅方法
-  const subscribeToStatus = useCallback((callback: StatusCallback): () => void => {
-    const handleStatusChange = (status: ConfigStatusInfo) => {
-      callback(status.status);
-    };
-    
-    wsClient.on('configChanged', handleStatusChange);
-    return () => wsClient.off('configChanged', handleStatusChange);
+  const subscribeToStatus = useCallback((callback: (status: ConfigStatus) => void) => {
+    wsClient.on('configStatus', callback);
+    return () => wsClient.off('configStatus', callback);
   }, []);
 
-  // 错误订阅方法
-  const subscribeToErrors = useCallback((callback: ErrorCallback): () => void => {
-    const handleError = (error: Error) => {
-      callback(error);
-    };
-    
-    wsClient.on('error', handleError);
-    return () => wsClient.off('error', handleError);
+  const subscribeToErrors = useCallback((callback: (error: Error) => void) => {
+    wsClient.on('error', callback);
+    return () => wsClient.off('error', callback);
   }, []);
 
   return {
@@ -94,6 +118,7 @@ export function useWebSocket() {
     uploadFile,
     subscribeToStatus,
     subscribeToErrors,
+    getConfig
   };
 }
 

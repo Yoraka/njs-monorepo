@@ -248,22 +248,18 @@ export class ConfigLoader extends EventEmitter {
    */
   public watchConfig(): void {
     if (this.watcher) {
-      this.watcher.close();
+      this.stopWatching();
     }
 
-    this.watcher = fs.watch(this.configPath, (eventType) => {
+    this.watcher = fs.watch(this.configPath, (eventType, filename) => {
       if (eventType === 'change') {
-        try {
-          const newConfig = this.loadConfig();
-          this.logger.info('Configuration file changed, reloading...');
-          this.emit('configUpdated', newConfig);
-        } catch (error) {
-          this.logger.error('Error reloading config:', error);
-        }
+        this.logger.info(`检测到配置文件变化: ${filename}`);
+        const newConfig = this.loadConfig();
+        this.emit('configUpdated', newConfig);
       }
     });
 
-    this.logger.info(`Watching config file: ${this.configPath}`);
+    this.logger.info(`开始监听配置文件变化: ${this.configPath}`);
   }
 
   /**
@@ -273,6 +269,7 @@ export class ConfigLoader extends EventEmitter {
     if (this.watcher) {
       this.watcher.close();
       this.watcher = null;
+      this.logger.info(`停止监听配置文件变化: ${this.configPath}`);
     }
   }
 

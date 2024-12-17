@@ -8,6 +8,15 @@ import { Config, UpstreamServer } from './types';
 import { Logger } from 'winston';
 import * as path from 'path';
 import { Server } from 'http';
+import * as dotenv from 'dotenv';
+
+// 加载环境变量
+dotenv.config({
+  path: path.resolve(process.cwd(), '.env')
+});
+
+// 默认配置路径
+const DEFAULT_CONFIG_PATH = path.join(process.cwd(), 'config', 'config.json');
 
 class ProxyApplication {
   private server: ProxyServer | null = null;
@@ -18,9 +27,12 @@ class ProxyApplication {
   private proxyManager: ProxyManager;
   private config: Config;
 
-  constructor(configPath: string) {
-    // 初始化配置加载器
-    this.configLoader = createConfigLoader(configPath, console as any);
+  constructor(configPath?: string) {
+    // 初始化配置加载器，使用环境变量或默认路径
+    this.configLoader = createConfigLoader(
+      configPath || process.env.PROXY_CONFIG_PATH || DEFAULT_CONFIG_PATH,
+      console as any
+    );
     
     // 加载初始配置
     this.config = this.configLoader.loadConfig();
@@ -72,12 +84,12 @@ class ProxyApplication {
   /**
    * 设置配置热重载
    */
-  private setupHotReload(): void {
+  private async setupHotReload(): Promise<void> {
     this.configLoader.on('configUpdated', async (newConfig: Config) => {
       try {
         this.logger.info('检测到配置文件更改，开始热重载...');
 
-        // 更新配置
+        // 新配置
         this.config = newConfig;
 
         // 更新日志配置
@@ -90,11 +102,22 @@ class ProxyApplication {
         );
 
         // 更新代理管理器
-        this.proxyManager.updateConfig(newConfig);
+        await this.proxyManager.updateConfig(newConfig);
 
-        // 更新监控配置
-        if (this.monitor) {
-          this.monitor.updateConfig(newConfig);
+        // 处理监控配置更新
+        if (newConfig.monitoring?.enabled) {
+          if (!this.monitor) {
+            // 如果之前没有启用监控，现在启用了，创建新的 monitor
+            this.monitor = createMonitor(newConfig, this.logger);
+            this.monitor.start();
+          } else {
+            // 更新现有的 monitor
+            await this.monitor.updateConfig(newConfig);
+          }
+        } else if (this.monitor) {
+          // 如果之前启用了监控，现在禁用了，关闭 monitor
+          await this.monitor.shutdown();
+          this.monitor = null;
         }
 
         // 更新服务器配置
@@ -105,6 +128,7 @@ class ProxyApplication {
         this.logger.info('配置热重载完成');
       } catch (error) {
         this.logger.error('配置热重载失败:', error);
+        // 在热重载失败时不要退出进程，保持服务继续运行
       }
     });
 
@@ -153,26 +177,49 @@ class ProxyApplication {
     const shutdown = async () => {
       this.logger.info('正在关闭服务器...');
 
-      // 停止监控
-      if (this.monitor) {
-        this.monitor.stop();
+      try {
+        // 停止配置文件监听
+        this.configLoader.stopWatching();
+
+        // 停止监控
+        if (this.monitor) {
+          await this.monitor.shutdown();
+          this.monitor = null;
+        }
+
+        // 停止健康检查
+        if (this.healthChecker) {
+          this.healthChecker.stop();
+        }
+
+        // 停止服务器
+        if (this.server) {
+          await this.server.stop();
+        }
+
+        this.logger.info('服务器已安全关闭');
+        process.exit(0);
+      } catch (error) {
+        this.logger.error('服务器关闭过程中出错:', error);
+        process.exit(1);
       }
-
-      // 停止健康检查
-      this.healthChecker.stop();
-
-      // 停止服务器
-      if (this.server) {
-        await this.server.stop();
-      }
-
-      this.logger.info('服务器已安全关闭');
-      process.exit(0);
     };
 
     // 监听退出信号
     process.on('SIGTERM', shutdown);
     process.on('SIGINT', shutdown);
+    
+    // 处理未捕获的异常
+    process.on('uncaughtException', (error) => {
+      this.logger.error('未捕获的异常:', error);
+      shutdown();
+    });
+    
+    // 处理未处理的 Promise 拒绝
+    process.on('unhandledRejection', (reason, promise) => {
+      this.logger.error('未处理的 Promise 拒绝:', reason);
+      shutdown();
+    });
   }
 }
 
@@ -181,7 +228,8 @@ class ProxyApplication {
  */
 async function main() {
   try {
-    const configPath = path.resolve(process.cwd(), 'config/config.json');
+    // 从环境变量获取配置文件路径，如果没有则使用默认路径
+    const configPath = process.env.PROXY_CONFIG_PATH || path.join(process.cwd(), 'config', 'config.json');
     const app = new ProxyApplication(configPath);
     await app.start();
   } catch (error) {

@@ -6,13 +6,18 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { getWebSocketClient } from '@/services/ws-client';
+import { toast } from '@/hooks/use-toast';
 
 interface ServerConfigPanelProps {
   servers: ServerConfig[];
   upstreams: UpstreamConfig[];
   selectedServer?: string;
   onServerSelect: (server: string) => void;
-  onServerChange: (server: string, changes: Partial<ServerConfig>) => void;
+  onServerChange: (
+    server: string, 
+    changes: Partial<ServerConfig> | ((prev: ServerConfig) => Partial<ServerConfig>)
+  ) => void;
   onUpstreamsChange: (upstreams: UpstreamConfig[]) => void;
   onAddServer: (server: ServerConfig) => void;
   configTemplate: ConfigGroup[];
@@ -34,6 +39,8 @@ export function ServerConfigPanel({
   const [localConfig, setLocalConfig] = useState<ServerConfig | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const wsClient = getWebSocketClient();
 
   const defaultServerConfig: ServerConfig = {
     name: `server-${servers.length + 1}`,
@@ -60,24 +67,21 @@ export function ServerConfigPanel({
     }
   }, [selectedServer, servers, isCreating]);
 
-  const handleChange = (changes: Partial<ServerConfig>) => {
+  const handleChange = (changes: Partial<ServerConfig> | ((prev: ServerConfig) => Partial<ServerConfig>)) => {
     if (!localConfig) return;
     
-    const newConfig = { ...localConfig };
-    
-    if ('locations' in changes && Array.isArray(changes.locations)) {
-      newConfig.locations = changes.locations.map((newLocation, index) => {
-        const oldLocation = localConfig.locations[index];
-        return {
-          ...oldLocation,
-          ...newLocation
-        };
+    if (typeof changes === 'function') {
+      setLocalConfig(prev => {
+        if (!prev) return prev;
+        const newChanges = changes(prev);
+        return { ...prev, ...newChanges } as ServerConfig;
       });
     } else {
-      Object.assign(newConfig, changes);
+      setLocalConfig(prev => {
+        if (!prev) return prev;
+        return { ...prev, ...changes } as ServerConfig;
+      });
     }
-
-    setLocalConfig(newConfig);
     setIsDirty(true);
   };
 
@@ -87,17 +91,55 @@ export function ServerConfigPanel({
     setIsDirty(true);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!localConfig || !isDirty) return;
     
-    if (isCreating) {
-      onAddServer(localConfig);
-      setIsCreating(false);
-    } else if (selectedServer) {
-      onServerChange(selectedServer, localConfig);
+    const wsStatus = wsClient.getStatus();
+    console.log('配置面板 - 开始保存配置:', {
+      wsStatus,
+      isCreating,
+      selectedServer,
+      localConfig
+    });
+    
+    if (wsStatus.connectionState !== 'connected') {
+      toast({
+        title: t('proxy.error'),
+        description: t('proxy.websocketNotConnected'),
+        variant: 'destructive',
+      });
+      return;
     }
     
-    setIsDirty(false);
+    setIsSaving(true);
+    try {
+      if (isCreating) {
+        console.log('配置面板 - 创建新服务器配置');
+        await onAddServer(localConfig);
+        setIsCreating(false);
+      } else if (selectedServer) {
+        console.log('配置面板 - 更新现有服务器配置:', {
+          serverName: selectedServer,
+          config: localConfig
+        });
+        await onServerChange(selectedServer, localConfig);
+      }
+      
+      setIsDirty(false);
+      toast({
+        title: t('proxy.configSaved'),
+        description: t('proxy.configSavedDesc'),
+      });
+    } catch (error) {
+      console.error('配置面板 - 保存配置失败:', error);
+      toast({
+        title: t('proxy.saveError'),
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleCancel = () => {
@@ -151,17 +193,14 @@ export function ServerConfigPanel({
                 <Button 
                   variant="outline" 
                   onClick={handleCancel}
-                  disabled={!isDirty}
+                  disabled={!isDirty || isSaving}
                 >
                   {t('common.cancel')}
-                  {isCreating 
-                    ? t('proxyManagement.serverConfig.creation')
-                    : t('proxyManagement.serverConfig.modification')
-                  }
                 </Button>
                 <Button 
                   onClick={handleSave}
-                  disabled={!isDirty}
+                  disabled={!isDirty || isSaving}
+                  loading={isSaving}
                 >
                   {isCreating 
                     ? t('proxyManagement.serverConfig.create')
@@ -177,6 +216,7 @@ export function ServerConfigPanel({
               upstreams={upstreams}
               onChange={handleChange}
               onUpstreamsChange={onUpstreamsChange}
+              onSave={handleSave}
             />
           </div>
         )}

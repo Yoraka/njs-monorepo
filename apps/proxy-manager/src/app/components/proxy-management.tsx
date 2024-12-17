@@ -8,6 +8,7 @@ import { ServerConfigPanel } from "./config-panels"
 import { UpstreamPanel } from "./upstream-panel"
 import { JsonConfig, ServerConfig, ConfigGroup, UpstreamConfig } from "@/types/proxy-config"
 import { useWebSocket } from "@/hooks/useWebSocket"
+import { toast } from "@/hooks/use-toast"
 
 // 定义配置模板
 const getServerConfigTemplate = (t: any): ConfigGroup[] => [
@@ -268,7 +269,7 @@ export default function ProxyManagement() {
   const [selectedServer, setSelectedServer] = useState<string>()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const { isConnected } = useWebSocket()
+  const { isConnected, updateConfig } = useWebSocket()
 
   // 改进的配置加载逻辑
   useEffect(() => {
@@ -319,23 +320,73 @@ export default function ProxyManagement() {
   }
 
   // 处理服务器配置变更
-  const handleServerChange = async (serverName: string, changes: Partial<ServerConfig>) => {
-    if (!config) return
+  const handleServerChange = async (
+    serverName: string, 
+    changes: Partial<ServerConfig> | ((prev: ServerConfig) => Partial<ServerConfig>)
+  ) => {
+    if (!config) return;
 
-    const updatedConfig = {
-      ...config,
-      servers: config.servers.map(server =>
-        server.name === serverName ? { ...server, ...changes } : server
-      )
+    console.log('代理管理 - 开始处理服务器配置更新:', {
+      serverName,
+      changes: typeof changes === 'function' ? 'Function' : changes
+    });
+
+    // 找到要更新的服务器
+    const serverIndex = config.servers.findIndex(server => server.name === serverName);
+    if (serverIndex === -1) {
+      console.error('代理管理 - 未找到要更新的服务器:', serverName);
+      return;
     }
+
+    // 获取原始服务器配置
+    const originalServer = config.servers[serverIndex];
+
+    // 计算新的服务器配置
+    const updatedServer = typeof changes === 'function' 
+      ? { ...originalServer, ...changes(originalServer) }
+      : { ...originalServer, ...changes };
 
     try {
-      await saveConfig(updatedConfig)
-      setConfig(updatedConfig)
+      console.log('代理管理 - 准备通过WebSocket更新服务器配置:', {
+        originalName: serverName,
+        newName: updatedServer.name,
+        config: updatedServer
+      });
+      
+      // 更新本地配置
+      const newServers = [...config.servers];
+      newServers[serverIndex] = updatedServer;
+      
+      const updatedConfig = {
+        ...config,
+        servers: newServers
+      };
+
+      // 通过 WebSocket 发送完整的配置更新
+      await updateConfig(updatedConfig);
+      console.log('代理管理 - 服务器配置已通过WebSocket更新');
+
+      // 更新本地状态
+      setConfig(updatedConfig);
+
+      // 如果服务器名称发生变化，更新选中的服务器
+      if (selectedServer === serverName && updatedServer.name !== serverName) {
+        setSelectedServer(updatedServer.name);
+      }
+      
+      console.log('代理管理 - 本地状态已更新');
     } catch (error) {
-      console.error('Error saving config:', error)
+      console.error('代理管理 - 更新服务器配置失败:', {
+        serverName,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      toast({
+        title: t('proxy.saveError'),
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
     }
-  }
+  };
 
   // 保存配置
   const saveConfig = async (newConfig: JsonConfig) => {

@@ -441,6 +441,53 @@ export default function Dashboard() {
     console.log("Add new server")
   }
 
+  useEffect(() => {
+    const metricsManager = getMetricsManager();
+    const wsClient = getWebSocketClient();
+    
+    const handleMetrics = (data: any) => {
+      if (!data || !data.serverMetrics) return;
+      
+      // 计算总流量（入站+出站）
+      let totalIncomingTraffic = 0;
+      let totalOutgoingTraffic = 0;
+      let totalConnections = 0;
+      
+      // 遍历所有服务器的指标
+      Object.entries(data.serverMetrics).forEach(([serverName, metrics]: [string, any]) => {
+        console.log('Debug - 处理服务器指标:', {
+          serverName,
+          metrics
+        });
+        
+        if (metrics) {
+          totalIncomingTraffic += metrics.incomingTraffic || 0;
+          totalOutgoingTraffic += metrics.outgoingTraffic || 0;
+          totalConnections += metrics.activeConnections || 0;
+        }
+      });
+
+      const totalTraffic = totalIncomingTraffic + totalOutgoingTraffic;
+      
+      setOverviewData(prev => ({
+        ...prev,
+        totalTraffic: formatTotalBytes(totalTraffic),
+        totalConnections: totalConnections
+      }));
+    };
+
+    // 初始化 MetricsManager
+    metricsManager.initialize().then(() => {
+      wsClient.on('metrics', handleMetrics);
+    }).catch(error => {
+      console.error('初始化 MetricsManager 失败:', error);
+    });
+    
+    return () => {
+      wsClient.off('metrics', handleMetrics);
+    };
+  }, []);
+
   return (
     <div className="p-8 space-y-8">
       <div className="flex justify-between items-center">

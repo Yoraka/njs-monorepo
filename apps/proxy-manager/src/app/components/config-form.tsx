@@ -1,4 +1,4 @@
-import { ServerConfig, ConfigGroup, ConfigField, UpstreamConfig, LocationConfig, RateLimitConfig, IPFilterConfig, CSRFConfig, HeadersConfig, HealthCheckConfig, ValidationResult } from '@/types/proxy-config';
+import { ServerConfig, ConfigGroup, ConfigField, UpstreamConfig, LocationConfig, RateLimitConfig, IPFilterConfig, CSRFConfig, HeadersConfig, HealthCheckConfig, ValidationResult, JsonConfig } from '@/types/proxy-config';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -11,6 +11,7 @@ import { UpstreamPanel } from '@/app/components/upstream-panel';
 import { useTranslation } from 'react-i18next';
 import { SSLSettingsForm } from './ssl-settings-form';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { getWebSocketClient } from '@/services/ws-client';
 import { ConfigStatus } from '@/services/config-service';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -19,15 +20,16 @@ interface ConfigFormProps {
   config?: ServerConfig;
   template: ConfigGroup[];
   upstreams?: UpstreamConfig[];
-  onChange: (changes: Partial<ServerConfig>) => void;
+  onChange: (changes: Partial<ServerConfig> | ((prev: ServerConfig) => Partial<ServerConfig>)) => void;
   onUpstreamsChange: (upstreams: UpstreamConfig[]) => void;
+  onSave?: () => Promise<void>;
 }
 
 interface UseWebSocketReturn {
   isConnected: boolean;
   error: Error | null;
   configStatus: ConfigStatus;
-  updateConfig: (config: ServerConfig) => Promise<void>;
+  updateConfig: (config: JsonConfig) => Promise<void>;
   uploadFile: (file: File, type: 'cert' | 'key' | 'other') => Promise<void>;
   subscribeToStatus: (callback: (status: ConfigStatus) => void) => () => void;
   subscribeToErrors: (callback: (error: Error) => void) => () => void;
@@ -46,14 +48,17 @@ export default function ConfigForm({
   template, 
   upstreams, 
   onChange,
-  onUpstreamsChange 
+  onUpstreamsChange,
+  onSave
 }: ConfigFormProps) {
   const { t } = useTranslation();
   const [showUpstreamPanel, setShowUpstreamPanel] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   
+  const wsClient = getWebSocketClient();
   const {
     uploadFile,
+    updateConfig,
   } = useWebSocket() as UseWebSocketReturn;
 
   // 处理文件上传
@@ -112,30 +117,27 @@ export default function ConfigForm({
     };
 
     const handleItemChange = (index: number, itemChanges: Record<string, any>) => {
-      const newValues = [...values];
-      const currentLocation = newValues[index] || {};
-      
-      console.log('handleItemChange:', {
-        index,
-        currentLocation,
-        itemChanges
+      onChange((prevConfig: ServerConfig) => {
+        const newLocations = [...(prevConfig.locations || [])];
+        const currentLocation = newLocations[index] || {};
+        
+        newLocations[index] = {
+          ...currentLocation,
+          ...itemChanges
+        };
+
+        return {
+          ...prevConfig,
+          locations: newLocations
+        };
       });
-
-      newValues[index] = {
-        ...currentLocation,
-        ...itemChanges
-      };
-
-      console.log('Updated locations:', newValues);
-      
-      onChange({ locations: newValues });
     };
 
     if (field.id === 'locations') {
       return (
         <div className="space-y-4">
           {values?.map((location, index) => (
-            <div key={index} className="group relative">
+            <div key={`location-${index}-${location.path || index}`} className="group relative">
               <div className="absolute -left-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-gray-50 text-sm font-medium text-gray-600 ring-1 ring-inset ring-gray-200">
                 {index + 1}
               </div>

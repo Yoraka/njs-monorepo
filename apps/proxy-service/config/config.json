@@ -1,62 +1,81 @@
 {
-    "upstreams": [
-      {
-        "name": "backend_servers",
-        "balancer": "round-robin",
-        "servers": [
-          {
-            "url": "http://127.0.0.1:3000",
-            "weight": 1,
-            "headers": {
-                "add": {
-                  "X-Proxy-By": "njs-proxy",
-                  "X-Real-IP": "${remote_addr}"
-                },
-                "remove": ["X-Powered-By"]
-            }
-          },
-          {
-            "url": "http://scu.edu.cn",
-            "weight": 1,
-            "backup": true
+  "upstreams": [
+    {
+      "name": "backend_servers",
+      "balancer": "round-robin",
+      "servers": [
+        {
+          "url": "http://127.0.0.1:3000",
+          "weight": 1,
+          "headers": {
+            "add": {
+              "X-Proxy-By": "njs-proxy",
+              "X-Real-IP": "${remote_addr}"
+            },
+            "remove": [
+              "X-Powered-By"
+            ]
           }
-        ],
-        "healthCheck": {
-          "type": "http",
-          "path": "/health",
-          "interval": 3000,
-          "timeout": 2000,
-          "retries": 3
+        },
+        {
+          "url": "http://scu.edu.cn",
+          "weight": 1,
+          "backup": true
         }
+      ],
+      "healthCheck": {
+        "type": "http",
+        "path": "/health",
+        "interval": 3000,
+        "timeout": 2000,
+        "retries": 3
       }
-    ],
-    "servers": [
-      {
-        "name": "default",
-        "listen": 9000,
-        "serverName": ["backend.wm-proxy.com"],
-        "locations": [
-          {
-            "path": "/",
-            "upstream": "backend_servers",
-            "proxyTimeout": 5000,
-            "proxyBuffering": true
-          }
-        ]
-      }
-    ],
-    "logging": {
-      "level": "info",
-      "file": "./logs/access.log"
+    }
+  ],
+  "servers": [
+    {
+      "name": "defaultA",
+      "listen": 9000,
+      "serverName": [
+        "wm-proxy.com"
+      ],
+      "locations": [
+        {
+          "path": "/",
+          "upstream": "backend_servers",
+          "proxyTimeout": 5000,
+          "proxyBuffering": true
+        }
+      ]
     },
-    "monitoring": {
-      "enabled": true,
-      "wsPort": 3001,
-      "pushInterval": 5000,
-      "metrics": [
-        "cpuUsage",
-        "memoryUsage",
-        "serverMetrics"
+    {
+      "name": "toscueducn",
+      "listen": 9001,
+      "serverName": [
+        "toscueducn.com"
+      ],
+      "locations": [
+        {
+          "path": "/",
+          "upstream": "backend_servers",
+          "proxyTimeout": 5000,
+          "proxyBuffering": true
+        }
       ]
     }
+  ],
+  "logging": {
+    "level": "info",
+    "file": "./logs/access.log"
+  },
+  "monitoring": {
+    "enabled": true,
+    "wsPort": 3001,
+    "pushInterval": 5000,
+    "metrics": [
+      "cpuUsage",
+      "memoryUsage",
+      "serverMetrics"
+    ]
+  }
 }

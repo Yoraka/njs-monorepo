@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events'
 import { MetricsData } from '@/types/metrics'
-import { ServerConfig, ConfigUpdateMessage, FileUploadMessage, ValidationResult, ServiceStatus } from '@/types/proxy-config'
+import { ServerConfig, ConfigUpdateMessage, FileUploadMessage, ValidationResult, ServiceStatus, JsonConfig } from '@/types/proxy-config'
 
 interface PendingMessage {
   type: string;
@@ -98,6 +98,8 @@ export class WebSocketClient extends EventEmitter {
 
     try {
       this.connectionState = 'connecting';
+      this.emit('stateChange', this.connectionState);
+      
       console.log('Debug - 开始创建 WebSocket 连接', {
         instanceId: this.instanceId,
         url: this.url,
@@ -125,6 +127,7 @@ export class WebSocketClient extends EventEmitter {
           });
           this.ws?.close();
           this.connectionState = 'failed';
+          this.emit('stateChange', this.connectionState);
           this.emit('error', new Error('Connection timeout'));
         }
       }, 5000);
@@ -159,6 +162,7 @@ export class WebSocketClient extends EventEmitter {
           stack: new Error().stack
         });
         this.connectionState = 'connected';
+        this.emit('stateChange', this.connectionState);
         this.reconnecting = false;
         this.reconnectAttempts = 0;
         this.emit('connected');
@@ -188,6 +192,8 @@ export class WebSocketClient extends EventEmitter {
         });
         
         this.cleanup();
+        this.connectionState = 'disconnected';
+        this.emit('stateChange', this.connectionState);
         
         if (!event.wasClean) {
           this.handleReconnect();
@@ -206,6 +212,7 @@ export class WebSocketClient extends EventEmitter {
           errorType: error instanceof Error ? error.name : typeof error
         });
         this.connectionState = 'failed';
+        this.emit('stateChange', this.connectionState);
         this.emit('error', error);
       };
 
@@ -219,6 +226,7 @@ export class WebSocketClient extends EventEmitter {
         stack: new Error().stack
       });
       this.connectionState = 'failed';
+      this.emit('stateChange', this.connectionState);
       this.emit('error', error);
       this.handleReconnect();
     }
@@ -346,13 +354,20 @@ export class WebSocketClient extends EventEmitter {
 
   public send(data: string) {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(data)
+      console.log('发送WebSocket数据:', {
+        instanceId: this.instanceId,
+        dataLength: data.length,
+        readyState: this.ws.readyState,
+        wsUrl: this.url
+      });
+      this.ws.send(data);
     } else {
-      console.warn('Debug - WebSocket 未连接，无法发送数据', {
+      console.warn('WebSocket未连接，无法发送数据:', {
         instanceId: this.instanceId,
         connectionState: this.connectionState,
-        readyState: this.ws?.readyState
-      })
+        readyState: this.ws?.readyState,
+        wsUrl: this.url
+      });
     }
   }
 
@@ -365,14 +380,42 @@ export class WebSocketClient extends EventEmitter {
     }
   }
 
-  public async sendConfigUpdate(config: ServerConfig, files?: Array<{ path: string; content: string }>): Promise<void> {
-    return this.sendWithResponse({
+  public async sendConfigUpdate(config: JsonConfig, files?: Array<{ path: string; content: string }>): Promise<void> {
+    console.log('准备发送配置更新:', {
+      instanceId: this.instanceId,
+      connectionState: this.connectionState,
+      readyState: this.ws?.readyState,
+      wsUrl: this.url
+    });
+    
+    // 构造完整的配置格式
+    const message = {
       type: 'configUpdate',
+      id: Math.random().toString(36).substring(2, 15),
+      timestamp: Date.now(),
       data: {
         config,
         files
       }
+    };
+
+    // 直接发送消息
+    const payload = JSON.stringify(message);
+    console.log('发送配置更新消息:', {
+      instanceId: this.instanceId,
+      messageId: message.id,
+      messageType: message.type,
+      payload
     });
+    
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket is not connected');
+    }
+    
+    this.send(payload);
+    
+    // 返回一个 Promise，但不等待响应
+    return Promise.resolve();
   }
 
   public async sendFileUpload(path: string, content: string, type: 'cert' | 'key' | 'other'): Promise<void> {
@@ -411,16 +454,44 @@ export class WebSocketClient extends EventEmitter {
     return new Promise((resolve, reject) => {
       try {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+          console.error('WebSocket未连接，无法发送消息:', {
+            instanceId: this.instanceId,
+            messageType: message.type,
+            connectionState: this.connectionState,
+            readyState: this.ws?.readyState,
+            wsUrl: this.url
+          });
           throw new Error('WebSocket is not connected');
         }
 
         const id = Math.random().toString(36).substring(2, 15);
+        const timestamp = Date.now();
+
+        console.log('准备发送WebSocket消息:', {
+          instanceId: this.instanceId,
+          messageId: id,
+          messageType: message.type,
+          timestamp,
+          data: message.type === 'configUpdate' ? {
+            ...message.data,
+            config: {
+              ...message.data.config,
+              // 只记录关键信息
+              servers: message.data.config.servers?.map((s: { name: string; listen: number }) => ({
+                name: s.name,
+                listen: s.listen
+              }))
+            }
+          } : message.data,
+          wsUrl: this.url
+        });
+
         const pendingMessage: PendingMessage = {
           type: message.type,
           id,
           resolve,
           reject,
-          timestamp: Date.now()
+          timestamp
         };
 
         this.messageQueue.push(pendingMessage);
@@ -428,14 +499,49 @@ export class WebSocketClient extends EventEmitter {
         setTimeout(() => {
           const index = this.messageQueue.findIndex(msg => msg === pendingMessage);
           if (index !== -1) {
+            console.warn('WebSocket消息超时:', {
+              instanceId: this.instanceId,
+              messageId: id,
+              messageType: message.type,
+              elapsedTime: Date.now() - timestamp,
+              wsUrl: this.url
+            });
             this.messageQueue.splice(index, 1);
             reject(new Error('Request timeout'));
           }
         }, this.messageTimeout);
 
-        this.send(JSON.stringify({ ...message, id }));
+        // 构造完整的消息格式
+        const fullMessage = {
+          ...message,
+          id,
+          timestamp,
+          // 确保 data 字段存在
+          data: message.data || null
+        };
+
+        const payload = JSON.stringify(fullMessage);
+        console.log('发送WebSocket消息内容:', {
+          instanceId: this.instanceId,
+          messageId: id,
+          payload
+        });
+        this.send(payload);
+        console.log('WebSocket消息已发送:', {
+          instanceId: this.instanceId,
+          messageId: id,
+          messageType: message.type,
+          wsUrl: this.url
+        });
 
       } catch (error) {
+        console.error('发送WebSocket消息失败:', {
+          instanceId: this.instanceId,
+          messageType: message.type,
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          wsUrl: this.url
+        });
         reject(error);
       }
     });
@@ -445,14 +551,40 @@ export class WebSocketClient extends EventEmitter {
     try {
       const data = JSON.parse(event.data);
       
-      console.log('Debug - 收到 WebSocket 消息:', {
+      console.log('Debug - 收到WebSocket消息', {
         instanceId: this.instanceId,
-        data
+        messageType: data.type,
+        messageId: data.id,
+        timestamp: new Date().toISOString()
       });
 
       if (!data || typeof data !== 'object') {
-        console.warn('Debug - 收到无效的消息格式:', data);
+        console.warn('Debug - 收到无效的消息格式', {
+          instanceId: this.instanceId,
+          data
+        });
         return;
+      }
+
+      if (data.type === 'configUpdateResponse') {
+        console.log('Debug - 配置更新响应', {
+          instanceId: this.instanceId,
+          messageId: data.id,
+          success: !data.error
+        });
+        
+        const pendingMessage = this.messageQueue.find(
+          msg => msg.type === 'configUpdate' && msg.id === data.id
+        );
+
+        if (pendingMessage) {
+          this.messageQueue = this.messageQueue.filter(msg => msg !== pendingMessage);
+          if (data.error) {
+            pendingMessage.reject(new Error(data.error));
+          } else {
+            pendingMessage.resolve(data.data);
+          }
+        }
       }
 
       if (data.metrics || (data.serverMetrics && data.systemMetrics)) {
@@ -505,13 +637,20 @@ export class WebSocketClient extends EventEmitter {
       });
 
     } catch (error) {
-      console.error('Debug - 解析 WebSocket 消息失败:', {
+      console.error('Debug - 解析WebSocket消息失败', {
         instanceId: this.instanceId,
         error,
         rawData: event.data
       });
       this.emit('error', error);
     }
+  }
+
+  public async getCurrentConfig(): Promise<JsonConfig> {
+    return this.sendWithResponse({
+      type: 'getConfig',
+      data: null
+    });
   }
 }
 
