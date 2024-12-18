@@ -4,7 +4,7 @@ import { setupLogger, updateLogger } from './logger';
 import { createMonitor } from './monitor';
 import { createHealthChecker } from './healthChecker';
 import { ProxyManager } from './proxyManager';
-import { Config, UpstreamServer, LoggingConfig } from './types';
+import { Config, UpstreamServer, LoggingConfig, HealthCheckConfig } from './types';
 import { Logger } from 'winston';
 import * as path from 'path';
 import { Server } from 'http';
@@ -44,10 +44,10 @@ class ProxyApplication {
     };
     this.logger = setupLogger(loggingConfig);
     
-    // 初始化健康检查��
+    // 初始化健康检查器
     this.healthChecker = createHealthChecker(
       this.getAllUpstreamServers(),
-      this.config.servers[0].healthCheck!, // 假设至少有一个服务器配置
+      this.getDefaultHealthCheckConfig(),
       this.logger
     );
 
@@ -69,20 +69,84 @@ class ProxyApplication {
 
     // 设置配置热重载
     this.setupHotReload();
+
+    // 设置进程退出处理
+    process.on('SIGINT', () => this.shutdown());
+    process.on('SIGTERM', () => this.shutdown());
   }
 
   /**
    * 获取所有上游服务器列表
    */
   private getAllUpstreamServers(): UpstreamServer[] {
-    return this.config.servers.reduce<UpstreamServer[]>((servers, serverConfig) => {
-      // 从每个 location 中收集 targets
-      const locationTargets = serverConfig.locations.reduce<UpstreamServer[]>(
-        (targets, location) => [...targets, ...(location.targets || [])],
-        []
-      );
-      return [...servers, ...locationTargets];
-    }, []);
+    const servers: UpstreamServer[] = [];
+    const seen = new Set<string>();
+
+    // 从 upstreams 中收集服务器
+    this.config.upstreams.forEach(upstream => {
+      upstream.servers.forEach(server => {
+        if (!seen.has(server.url)) {
+          seen.add(server.url);
+          // 继承 upstream 的健康检查配置
+          if (!server.healthCheck && upstream.healthCheck) {
+            server.healthCheck = { ...upstream.healthCheck };
+          }
+          servers.push(server);
+        }
+      });
+    });
+
+    // 从每个 location 中收集 targets
+    this.config.servers.forEach(serverConfig => {
+      serverConfig.locations.forEach(location => {
+        if (location.targets) {
+          location.targets.forEach(server => {
+            if (!seen.has(server.url)) {
+              seen.add(server.url);
+              // 继承 location 的健康检查配置
+              if (!server.healthCheck && location.healthCheck) {
+                server.healthCheck = { ...location.healthCheck };
+              }
+              // 如果 location 没有配置，继承 server 的健康检查配置
+              if (!server.healthCheck && serverConfig.healthCheck) {
+                server.healthCheck = { ...serverConfig.healthCheck };
+              }
+              servers.push(server);
+            }
+          });
+        }
+      });
+    });
+
+    return servers;
+  }
+
+  /**
+   * 获取默认的健康检查配置
+   */
+  private getDefaultHealthCheckConfig(): HealthCheckConfig {
+    // 首先尝试使用第一个 upstream 的配置
+    const firstUpstream = this.config.upstreams[0];
+    if (firstUpstream?.healthCheck) {
+      return firstUpstream.healthCheck;
+    }
+
+    // 然后尝试使用第一个服务器的配置
+    const firstServer = this.config.servers[0];
+    if (firstServer?.healthCheck) {
+      return firstServer.healthCheck;
+    }
+
+    // 最后使用默认配置
+    return {
+      enabled: true,
+      type: 'http',
+      path: '/',
+      interval: 1000,
+      timeout: 1000,
+      retries: 1,
+      expectedStatus: [200, 301, 302, 404]
+    };
   }
 
   /**
@@ -91,7 +155,10 @@ class ProxyApplication {
   private async setupHotReload(): Promise<void> {
     this.configLoader.on('configUpdated', async (newConfig: Config) => {
       try {
-        this.logger.info('检测到��置文件更改，开始热重载...');
+        this.logger.info('检测到配置文件更改，开始热重载...');
+
+        // 停止健康检查器
+        this.healthChecker.stop();
 
         // 新配置
         this.config = newConfig;
@@ -104,8 +171,11 @@ class ProxyApplication {
         // 更新健康检查器
         this.healthChecker.updateConfig(
           this.getAllUpstreamServers(),
-          newConfig.servers[0].healthCheck!
+          this.getDefaultHealthCheckConfig()
         );
+
+        // 重新启动健康检查器
+        this.healthChecker.start();
 
         // 更新代理管理器
         await this.proxyManager.updateConfig(newConfig);
@@ -134,7 +204,7 @@ class ProxyApplication {
         this.logger.info('配置热重载完成');
       } catch (error) {
         this.logger.error('配置热重载失败:', error);
-        // 在热重载失败时不要退出进程，保持服务继续运行
+        // 在重载失败时不要退出进程，保持服务继续运行
       }
     });
 
@@ -227,6 +297,30 @@ class ProxyApplication {
       shutdown();
     });
   }
+
+  private async shutdown(): Promise<void> {
+    this.logger.info('正在关闭应用程序...');
+    
+    // 停止监控系统
+    if (this.monitor) {
+      this.monitor.stop();
+    }
+    
+    // 关闭服务器
+    if (this.server) {
+      await new Promise<void>((resolve) => {
+        this.server?.stop().then(() => {
+          this.logger.info('HTTP服务器已关闭');
+          resolve();
+        });
+      });
+    }
+    
+    // 等待所有日志写入完成
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    process.exit(0);
+  }
 }
 
 /**
@@ -249,4 +343,5 @@ if (require.main === module) {
   main();
 }
 
+// 只导出一次
 export { ProxyApplication };

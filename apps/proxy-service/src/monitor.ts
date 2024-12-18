@@ -154,6 +154,10 @@ export class Monitor extends EventEmitter {
 
     // 启动系统指标收集
     this.startSystemMetricsCollection();
+
+    // 设置进程退出时的清理
+    process.on('SIGINT', () => this.cleanup());
+    process.on('SIGTERM', () => this.cleanup());
   }
 
   /**
@@ -748,15 +752,25 @@ export class Monitor extends EventEmitter {
    * 更新配置
    */
   public async updateConfig(newConfig: Config): Promise<void> {
+    // 如果已经在关闭中，直接返回
     if (this.isShuttingDown) {
-      throw new Error('Monitor is shutting down');
+      this.logger.warn('Monitor is shutting down, update rejected');
+      return;
     }
 
+    // 如果已经在更新中，等待一段时间后重试
     if (this.updateLock) {
-      throw new Error('Configuration update in progress');
+      this.logger.warn('Configuration update in progress, waiting...');
+      await new Promise(resolve => setTimeout(resolve, 500));
+      if (this.updateLock) {
+        this.logger.error('Configuration update timeout');
+        return;
+      }
     }
 
     this.updateLock = true;
+    const configBackup = JSON.parse(JSON.stringify(this.config));
+
     try {
       const now = Date.now();
       if (now - this.lastUpdateTime < this.updateCooldown) {
@@ -764,15 +778,16 @@ export class Monitor extends EventEmitter {
           timeSinceLastUpdate: now - this.lastUpdateTime,
           cooldown: this.updateCooldown
         });
-        throw new Error('配置更新太频繁，请等待1秒后再试');
-      }
-
-      // 在更新前备份当前配置
-      if (!this.lastConfigBackup) {
-        this.lastConfigBackup = JSON.parse(JSON.stringify(this.config));
+        return;
       }
 
       this.lastUpdateTime = now;
+
+      // 检查配置是否实际发生了变化
+      if (JSON.stringify(this.config) === JSON.stringify(newConfig)) {
+        this.logger.info('配置未发生变化，跳过更新');
+        return;
+      }
 
       // 检查 WebSocket 配置变更
       const currentWsPort = this.config.monitoring?.wsPort || 3001;
@@ -818,7 +833,9 @@ export class Monitor extends EventEmitter {
               error: error instanceof Error ? error.message : String(error),
               port: newWsPort
             });
-            throw error;
+            // 恢复到原始配置
+            this.config = configBackup;
+            return;
           }
         }
       }
@@ -840,9 +857,6 @@ export class Monitor extends EventEmitter {
           timestamp: new Date().toISOString()
         });
         
-        // 更新成功后，将当前配置设为新的备份
-        this.lastConfigBackup = JSON.parse(JSON.stringify(newConfig));
-        
         // 发出配置更新事件
         this.emit('configUpdated', newConfig);
 
@@ -859,7 +873,9 @@ export class Monitor extends EventEmitter {
           error: error instanceof Error ? error.message : String(error),
           path: configPath
         });
-        throw error;
+        // 恢复到原始配置
+        this.config = configBackup;
+        return;
       }
 
       // 重启监控服务（如果需要）
@@ -873,16 +889,14 @@ export class Monitor extends EventEmitter {
         clearInterval(this.systemMetricsInterval);
         this.startSystemMetricsCollection();
       }
+
     } catch (error) {
       this.logger.error('更新配置失败:', {
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined
       });
-      // 如果更新失败且不是因为频率限制，恢复到备份配置
-      if (this.lastConfigBackup && error instanceof Error && error.message !== '配置更新太频繁，请等待1秒后再试') {
-        await this.restoreConfig();
-      }
-      throw error;
+      // 恢复到原始配置
+      this.config = configBackup;
     } finally {
       this.updateLock = false;
     }
@@ -978,6 +992,40 @@ export class Monitor extends EventEmitter {
         else resolve();
       });
     });
+  }
+
+  private cleanup(): void {
+    this.logger.info('正在清理监控系统...');
+    
+    // 清理定时器
+    if (this.pushInterval) {
+      clearInterval(this.pushInterval);
+      this.pushInterval = null;
+    }
+    
+    if (this.systemMetricsInterval) {
+      clearInterval(this.systemMetricsInterval);
+      this.systemMetricsInterval = undefined;
+    }
+    
+    // 关闭所有WebSocket连接
+    if (this.wss) {
+      this.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.close();
+        }
+      });
+      this.clients.clear();
+      
+      this.wss.close(() => {
+        this.logger.info('WebSocket服务器已关闭');
+      });
+    }
+    
+    // 确保日志输出完成后再退出
+    setTimeout(() => {
+      process.exit(0);
+    }, 100);
   }
 }
 

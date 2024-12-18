@@ -10,12 +10,21 @@ export class RoundRobinBalancer extends BaseBalancer {
   private currentWeight: number;
   private maxWeight: number = 0;
   private gcd: number = 1; // 最大公约数，默认为1
+  private currentServer: UpstreamServer | null = null;  // 添加当前服务器的引用
 
   constructor(servers: UpstreamServer[]) {
     super(servers);
     this.currentIndex = -1;
     this.currentWeight = 0;
     this.initializeWeights();
+  }
+
+  /**
+   * 获取当前正在使用的服务器
+   * @returns 返回当前服务器，如果没有则返回 null
+   */
+  public getCurrentServer(): UpstreamServer | null {
+    return this.currentServer;
   }
 
   /**
@@ -29,16 +38,20 @@ export class RoundRobinBalancer extends BaseBalancer {
     
     // 如果没有可用服务器，尝试使用备用服务器
     if (availableServers.length === 0) {
-      return this.tryGetBackupServer();
+      this.currentServer = this.tryGetBackupServer();
+      return this.currentServer;
     }
 
     // 如果只有一个可用服务器，直接返回
     if (availableServers.length === 1) {
-      return availableServers[0];
+      this.currentServer = availableServers[0];
+      return this.currentServer;
     }
 
     // 使用加权轮询算法选择服务器
-    return this.getNextWeightedServer(availableServers);
+    const server = this.getNextWeightedServer(availableServers);
+    this.currentServer = server;
+    return server;
   }
 
   /**
@@ -47,6 +60,9 @@ export class RoundRobinBalancer extends BaseBalancer {
    */
   public updateServers(servers: UpstreamServer[]): void {
     super.updateServers(servers);
+    this.currentIndex = -1;
+    this.currentWeight = 0;
+    this.currentServer = null;  // 重置当前服务器引用
     this.initializeWeights();
   }
 
@@ -91,6 +107,7 @@ export class RoundRobinBalancer extends BaseBalancer {
         if (this.currentWeight <= 0) {
           this.currentWeight = this.maxWeight;
           if (this.currentWeight === 0) {
+            this.currentServer = servers[0];
             return servers[0]; // 如果所有权重都是0，直接返回第一个服务器
           }
         }
@@ -99,6 +116,7 @@ export class RoundRobinBalancer extends BaseBalancer {
       const currentServer = servers[this.currentIndex];
       if ((currentServer.weight || 1) >= this.currentWeight) {
         server = currentServer;
+        this.currentServer = server;  // 更新当前服务器引用
       }
     }
     

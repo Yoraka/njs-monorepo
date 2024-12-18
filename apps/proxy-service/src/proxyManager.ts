@@ -1,4 +1,4 @@
-import { ServerConfig, Config, LocationConfig, UpstreamConfig } from './types';
+import { ServerConfig, Config, LocationConfig, UpstreamConfig, UpstreamServer } from './types';
 import { Request } from 'express';
 import { HealthChecker } from './healthChecker';
 import { Logger } from 'winston';
@@ -12,12 +12,13 @@ import { Monitor } from './monitor';
  * 负责管理代理中间件、负载均衡和请求转发
  */
 export class ProxyManager {
+  public readonly healthChecker: HealthChecker;
   private balancers: Map<string, Balancer> = new Map();
   private upstreamMap: Map<string, UpstreamConfig> = new Map();
-  private healthChecker: HealthChecker;
   private logger: Logger;
   private config: Config;
-  public monitor?: Monitor;
+  public readonly monitor?: Monitor;
+  private backupMode: Map<string, boolean> = new Map();
 
   constructor(
     config: Config,
@@ -25,14 +26,14 @@ export class ProxyManager {
     logger: Logger,
     monitor?: Monitor
   ) {
-    this.config = config;
     this.healthChecker = healthChecker;
     this.logger = logger;
     this.monitor = monitor;
+    this.config = config;
     this.initializeUpstreams();
     this.initializeBalancers();
 
-    // 监听健康检查事件
+    // 监听健���检查事件
     this.setupHealthCheckListeners();
   }
 
@@ -41,8 +42,18 @@ export class ProxyManager {
    */
   private initializeUpstreams(): void {
     this.upstreamMap.clear();
+    this.backupMode.clear();
+    
     this.config.upstreams.forEach(upstream => {
       this.upstreamMap.set(upstream.name, upstream);
+      this.backupMode.set(upstream.name, false);
+      
+      // 确保健康检查配置正确继承
+      upstream.servers.forEach(server => {
+        if (!server.healthCheck && upstream.healthCheck) {
+          server.healthCheck = { ...upstream.healthCheck };
+        }
+      });
     });
   }
 
@@ -56,7 +67,7 @@ export class ProxyManager {
     this.config.upstreams.forEach(upstream => {
       const balancer = BalancerFactory.createBalancer({
         balancer: upstream.balancer,
-        targets: upstream.servers
+        targets: this.filterAvailableServers(upstream.servers, upstream.name)
       });
       this.balancers.set(upstream.name, balancer);
     });
@@ -68,7 +79,7 @@ export class ProxyManager {
           const balancerKey = `${serverConfig.name}:${location.path}`;
           const balancer = BalancerFactory.createBalancer({
             balancer: location.balancer || 'round-robin',
-            targets: location.targets,
+            targets: this.filterAvailableServers(location.targets, balancerKey),
             path: location.path
           });
           this.balancers.set(balancerKey, balancer);
@@ -78,18 +89,121 @@ export class ProxyManager {
   }
 
   /**
+   * 过滤可用的服务器
+   */
+  private filterAvailableServers(servers: UpstreamServer[], upstreamName: string): UpstreamServer[] {
+    const isInBackupMode = this.backupMode.get(upstreamName) || false;
+    
+    if (isInBackupMode) {
+      // 在备份模式下，只返回可用的备份服务器
+      return servers.filter(server => 
+        server.backup && 
+        !server.down && 
+        this.healthChecker.getServerStatus(server.url)
+      );
+    }
+
+    // 在正常模式下，只返回可用的主服务器
+    const availablePrimary = servers.filter(server => 
+      !server.backup && 
+      !server.down && 
+      this.healthChecker.getServerStatus(server.url)
+    );
+
+    // 如果没有可用的主服务器，切换到备份模式
+    if (availablePrimary.length === 0) {
+      this.backupMode.set(upstreamName, true);
+      const availableBackup = servers.filter(server => 
+        server.backup && 
+        !server.down && 
+        this.healthChecker.getServerStatus(server.url)
+      );
+      
+      if (availableBackup.length > 0) {
+        this.logger.info(`Switching to backup servers for ${upstreamName}`, {
+          backupServers: availableBackup.map(s => s.url)
+        });
+        return availableBackup;
+      }
+    }
+
+    return availablePrimary;
+  }
+
+  /**
    * 设置健康检查监听器
    */
   private setupHealthCheckListeners(): void {
     this.healthChecker.on('serverDown', (server) => {
       this.logger.warn(`Server ${server.url} is down, updating balancers`);
-      this.updateBalancersForServerChange();
+      this.handleServerStateChange(server, false);
     });
 
     this.healthChecker.on('serverUp', (server) => {
       this.logger.info(`Server ${server.url} is back online, updating balancers`);
-      this.updateBalancersForServerChange();
+      this.handleServerStateChange(server, true);
     });
+  }
+
+  /**
+   * 处理服务器状态变化
+   */
+  private handleServerStateChange(changedServer: UpstreamServer, isUp: boolean): void {
+    // 更新服务器状态
+    changedServer.down = !isUp;
+    
+    this.logger.debug(`处理服务器状态变化`, {
+      server: changedServer.url,
+      isUp,
+      isBackup: changedServer.backup,
+      down: changedServer.down
+    });
+
+    // 检查是否需要切换模式
+    this.upstreamMap.forEach((upstream, upstreamName) => {
+      const isCurrentlyInBackupMode = this.backupMode.get(upstreamName);
+      const hasServer = upstream.servers.some(s => s.url === changedServer.url);
+      
+      if (!hasServer) return;
+
+      // 添加详细日志
+      this.logger.debug(`检查上游服务器组状态`, {
+        upstreamName,
+        isCurrentlyInBackupMode,
+        changedServerUrl: changedServer.url,
+        isBackup: changedServer.backup,
+        isUp
+      });
+
+      if (isUp && !changedServer.backup) {
+        // 主服务器恢复时，立即切回主服务器模式
+        if (isCurrentlyInBackupMode) {
+          this.backupMode.set(upstreamName, false);
+          this.logger.info(`主服务器恢复，切换回主服务器模式: ${upstreamName}`, {
+            server: changedServer.url
+          });
+        }
+      } else if (!isUp && !changedServer.backup && !isCurrentlyInBackupMode) {
+        // 主服务器宕机时的处理逻辑保持不变
+        const hasAvailablePrimary = upstream.servers.some(s => 
+          !s.backup && !s.down && this.healthChecker.getServerStatus(s.url)
+        );
+        
+        if (!hasAvailablePrimary) {
+          const hasAvailableBackup = upstream.servers.some(s => 
+            s.backup && !s.down && this.healthChecker.getServerStatus(s.url)
+          );
+          
+          if (hasAvailableBackup) {
+            this.backupMode.set(upstreamName, true);
+            this.logger.info(`所有主服务器不可用，切换到备份服务器: ${upstreamName}`);
+          }
+        }
+      }
+    });
+
+    // 更新所有负载均衡器
+    this.updateBalancersForServerChange();
   }
 
   /**
@@ -100,7 +214,8 @@ export class ProxyManager {
     this.config.upstreams.forEach(upstream => {
       const balancer = this.balancers.get(upstream.name);
       if (balancer) {
-        balancer.updateServers(upstream.servers);
+        const availableServers = this.filterAvailableServers(upstream.servers, upstream.name);
+        balancer.updateServers(availableServers);
       }
     });
 
@@ -111,7 +226,8 @@ export class ProxyManager {
           const balancerKey = `${serverConfig.name}:${location.path}`;
           const balancer = this.balancers.get(balancerKey);
           if (balancer) {
-            balancer.updateServers(location.targets);
+            const availableServers = this.filterAvailableServers(location.targets, balancerKey);
+            balancer.updateServers(availableServers);
           }
         }
       });
@@ -149,54 +265,21 @@ export class ProxyManager {
         throw new Error(`No balancer found for location: ${location.path} in server ${serverConfig.name}`);
       }
 
-      // 获取下一个可用的服务器
       const server = balancer.getNextServer();
       if (!server) {
-        // 如果没有可用的服务器，尝试使用备份服务器
-        const backupServer = this.findAvailableBackupServer(location);
-        if (backupServer) {
-          this.logger.info(`Using backup server: ${backupServer.url} for ${location.path}`);
-          return this.normalizeTargetUrl(backupServer.url);
-        }
         throw new Error(`No available servers for location: ${location.path}`);
       }
 
       const targetUrl = this.normalizeTargetUrl(server.url);
-      this.logger.debug(`Selected target server: ${targetUrl} for ${location.path}`);
+      this.logger.debug(`Selected target server: ${targetUrl} for ${location.path}`, {
+        isBackupMode: this.backupMode.get(balancerKey),
+        serverUrl: server.url,
+        isBackup: server.backup
+      });
       return targetUrl;
     }
 
     throw new Error(`No proxy target specified for location: ${location.path}`);
-  }
-
-  /**
-   * 查找可用的备份服务器
-   */
-  private findAvailableBackupServer(location: LocationConfig): { url: string } | null {
-    // 如果是直接配置的 targets
-    if (location.targets) {
-      return location.targets.find(server => 
-        server.backup && 
-        !server.down && 
-        this.healthChecker.getServerStatus(server.url)
-      ) || null;
-    }
-    
-    // 如果引用了 upstream
-    if (location.upstream) {
-      const upstream = this.config.upstreams.find(u => u.name === location.upstream);
-      if (!upstream) {
-        return null;
-      }
-      
-      return upstream.servers.find(server => 
-        server.backup && 
-        !server.down && 
-        this.healthChecker.getServerStatus(server.url)
-      ) || null;
-    }
-
-    return null;
   }
 
   /**
@@ -228,12 +311,14 @@ export class ProxyManager {
       activeServers: number;
       totalServers: number;
       backupServers: number;
+      isInBackupMode: boolean;
     }},
     servers: { [serverName: string]: { 
       [location: string]: {
         activeServers: number;
         totalServers: number;
         backupServers: number;
+        isInBackupMode: boolean;
       }
     }}
   } {
@@ -244,53 +329,33 @@ export class ProxyManager {
     
     // 统计 upstream 信息
     this.config.upstreams.forEach(upstream => {
-      const activeServers = upstream.servers.filter(
-        server => this.isServerAvailable(server) && !server.backup
-      ).length;
-
-      const backupServers = upstream.servers.filter(
-        server => this.isServerAvailable(server) && server.backup
-      ).length;
-
+      const isInBackupMode = this.backupMode.get(upstream.name) || false;
+      const activeServers = this.filterAvailableServers(upstream.servers, upstream.name).length;
+      const backupServers = upstream.servers.filter(s => s.backup).length;
+      
       stats.upstreams[upstream.name] = {
         activeServers,
         totalServers: upstream.servers.length,
-        backupServers
+        backupServers,
+        isInBackupMode
       };
     });
-    
+
     // 统计 server location 信息
-    this.config.servers.forEach(serverConfig => {
-      stats.servers[serverConfig.name] = {};
-      
-      serverConfig.locations.forEach(location => {
+    this.config.servers.forEach(server => {
+      stats.servers[server.name] = {};
+      server.locations.forEach(location => {
         if (location.targets) {
-          // 处理直接配置的 targets
-          const activeServers = location.targets.filter(
-            server => this.isServerAvailable(server) && !server.backup
-          ).length;
-
-          const backupServers = location.targets.filter(
-            server => this.isServerAvailable(server) && server.backup
-          ).length;
-
-          stats.servers[serverConfig.name][location.path] = {
+          const balancerKey = `${server.name}:${location.path}`;
+          const isInBackupMode = this.backupMode.get(balancerKey) || false;
+          const activeServers = this.filterAvailableServers(location.targets, balancerKey).length;
+          const backupServers = location.targets.filter(s => s.backup).length;
+          
+          stats.servers[server.name][location.path] = {
             activeServers,
             totalServers: location.targets.length,
-            backupServers
-          };
-        } else if (location.upstream) {
-          // 引用 upstream 的情况，复用 upstream 的统计信息
-          const upstreamStats = stats.upstreams[location.upstream];
-          if (upstreamStats) {
-            stats.servers[serverConfig.name][location.path] = { ...upstreamStats };
-          }
-        } else if (location.proxy_pass) {
-          // 直接 proxy_pass 的情况
-          stats.servers[serverConfig.name][location.path] = {
-            activeServers: 1,
-            totalServers: 1,
-            backupServers: 0
+            backupServers,
+            isInBackupMode
           };
         }
       });

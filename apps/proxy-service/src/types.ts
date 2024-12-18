@@ -45,6 +45,7 @@ export interface Config {
     backup?: boolean;
     down?: boolean;
     secure?: boolean;
+    healthCheck?: HealthCheckConfig;
     headers?: {
       add?: { [key: string]: string };
       remove?: string[];

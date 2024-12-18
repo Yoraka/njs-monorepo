@@ -14,11 +14,18 @@ import { EventEmitter } from 'events';
 import { IncomingMessage } from 'http';
 import { HttpsServer } from './ssl/httpsServer';
 import { CaptchaManager, createCaptchaManager } from './captcha/captchaPage';
+import { Balancer } from './balancer/balancer';
 
 // 定义通用服务器类型
 type GenericServer = Server | HTTPSServer | http2.Http2Server | ReturnType<typeof http2.createSecureServer>;
 
-export class ProxyServer extends EventEmitter {
+export interface ProxyServer {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  updateConfig(config: Config): Promise<void>;
+}
+
+export class ProxyServer extends EventEmitter implements ProxyServer {
   private app: Express;
   private server: GenericServer | null = null;
   private httpsServer: HttpsServer | null = null;
@@ -248,7 +255,7 @@ export class ProxyServer extends EventEmitter {
       if (protocol === 'https:') {
         return new https.Agent({
           ...baseOptions,
-          rejectUnauthorized: false  // 允许自签名证书
+          rejectUnauthorized: false  // 允许名证书
         });
       }
       return new http.Agent(baseOptions);
@@ -337,7 +344,7 @@ export class ProxyServer extends EventEmitter {
           try {
             this.logger.debug(`Proxy request started: ${req.method} ${req.url}`);
 
-            // POST 请求��处理
+            // POST 请求处理
             if (req.method === 'POST' && req.body) {
               let bodyData = req.body;
               if (typeof bodyData !== 'string') {
@@ -359,6 +366,12 @@ export class ProxyServer extends EventEmitter {
 
         // 代理响应处理
         proxyRes: (proxyRes, req, res) => {
+          // 添加全局禁用缓存的响应头
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+          res.setHeader('Surrogate-Control', 'no-store');
+
           // 处理 Set-Cookie
           const setCookie = proxyRes.headers['set-cookie'];
           if (setCookie) {
@@ -372,23 +385,95 @@ export class ProxyServer extends EventEmitter {
 
           // 处理重定向
           if (proxyRes.statusCode && proxyRes.statusCode >= 300 && proxyRes.statusCode < 400 && proxyRes.headers.location) {
-            const location = proxyRes.headers.location;
+            const locationHeader = proxyRes.headers.location;
             const hasSSL = this.config.ssl?.enabled;
+            const originalHost = req.headers.host || '';
 
-            // 根据SSL配置处理重定向
-            if (hasSSL) {
-              res.writeHead(302, { Location: location });
-            } else {
-              // 降级
-              if (location.startsWith('https:')) {
-                // 处理 HTTPS 重定向
-                res.writeHead(302, { Location: location.replace('https:', 'http:') });
-              } else {
-                // 保持原始重定向
-                res.writeHead(302, { Location: location });
+            // 获取当前目标服务器信息
+            let currentServer: { url: string; backup?: boolean } | null = null;
+            if (location.upstream) {
+              const balancer = this.proxyManager.getUpstreamBalancer(location.upstream);
+              if (balancer) {
+                currentServer = balancer.getCurrentServer();
               }
+            } else if (location.proxy_pass) {
+              currentServer = { url: location.proxy_pass };
             }
-            res.end();
+
+            try {
+              const redirectUrl = new URL(locationHeader);
+              
+              // 判断是否是备用服务器的外部重定向
+              const isBackupServer = currentServer?.backup === true;
+              const isExternalRedirect = originalHost && redirectUrl.host !== originalHost;
+              
+              // 记录重定向信息
+              this.logger.debug('重定向详情:', {
+                originalUrl: `${req.method} ${req.url}`,
+                locationHeader,
+                isBackupServer,
+                isExternalRedirect,
+                currentServer: currentServer?.url,
+                originalHost
+              });
+
+              if (isBackupServer && isExternalRedirect) {
+                // 如果是备用服务器的外部重定向，直接透传，不改写
+                this.logger.debug(`备用服务器外部重定向，保持原始地址: ${locationHeader}`);
+                res.setHeader('Location', locationHeader);
+                
+                // 添加响应头指示这是备用服务器的重定向
+                res.setHeader('X-Proxy-Backup-Redirect', 'true');
+                
+                // 发送响应
+                res.writeHead(proxyRes.statusCode);
+                res.end();
+                return;
+              }
+
+              // 处理相对路径重定向
+              if (locationHeader.startsWith('/')) {
+                const newLocation = `${hasSSL ? 'https' : 'http'}://${originalHost}${locationHeader}`;
+                this.logger.debug(`相对路径重定向，改写为: ${newLocation}`);
+                res.setHeader('Location', newLocation);
+                res.writeHead(proxyRes.statusCode);
+                res.end();
+                return;
+              }
+
+              // 处理内部重定向（同域名）
+              if (redirectUrl.host === originalHost) {
+                this.logger.debug(`内部重定向，保持原始协议和主机名: ${locationHeader}`);
+                // 保持原有的重定向地址
+                res.setHeader('Location', locationHeader);
+                res.writeHead(proxyRes.statusCode);
+                res.end();
+                return;
+              }
+
+              // 其他情况：非备用服务器的外部重定向
+              // 改写为原始域名，但保持路径和查询参数
+              redirectUrl.host = originalHost;
+              redirectUrl.protocol = hasSSL ? 'https:' : 'http:';
+              const newLocation = redirectUrl.toString();
+              
+              this.logger.debug(`标准重定向处理，改写为: ${newLocation}`);
+              res.setHeader('Location', newLocation);
+              res.writeHead(proxyRes.statusCode);
+              res.end();
+
+            } catch (error) {
+              // URL 解析失败，假设是相对路径
+              const newLocation = `${hasSSL ? 'https' : 'http'}://${originalHost}${
+                locationHeader.startsWith('/') ? locationHeader : `/${locationHeader}`
+              }`;
+              
+              this.logger.debug(`URL解析失败，处理为相对路径: ${newLocation}`, error);
+              res.setHeader('Location', newLocation);
+              res.writeHead(proxyRes.statusCode);
+              res.end();
+            }
+            return;
           }
 
           // 监控响应数据
@@ -410,7 +495,7 @@ export class ProxyServer extends EventEmitter {
               }
             }
             
-            // 添加头部结束标记大小
+            // 添加部结束标记大小
             outgoingBytes += '\r\n'.length;
 
             // 计算响应体大小
@@ -433,40 +518,132 @@ export class ProxyServer extends EventEmitter {
         },
 
         // 统一错误处理
-        error: (err: Error, req: IncomingMessage, res: any) => {
+        error: async (err: Error, req: IncomingMessage & { body?: any }, res: any) => {
           try {
             const errorMessage = `Proxy error for ${req.url}: ${err.message}`;
             this.logger.error(errorMessage);
 
-            // 检查是否是 WebSocket 请求
-            if ((req.headers['upgrade'] || '').toLowerCase() === 'websocket') {
-              // WebSocket 错误处理
-              if (res && res.socket && !res.socket.destroyed) {
-                res.socket.end();
+            // 检查是否是连接错误
+            if (err.message.includes('ECONNREFUSED') || err.message.includes('ETIMEDOUT')) {
+              this.logger.warn(`检测到连接错误，触发紧急健康检查: ${err.message}`);
+              
+              // 获取当前目标服务器
+              let currentTarget: string | undefined;
+              if (location.proxy_pass) {
+                currentTarget = location.proxy_pass;
+              } else if (location.upstream) {
+                const upstream = this.config.upstreams.find(u => u.name === location.upstream);
+                if (upstream && upstream.servers.length > 0) {
+                  const balancer = this.proxyManager.getUpstreamBalancer(location.upstream);
+                  if (balancer) {
+                    const currentServer = balancer.getCurrentServer();
+                    if (currentServer) {
+                      currentTarget = currentServer.url;
+                    }
+                  }
+                }
               }
-            } else {
-              // HTTP 请求错误处理
-              if (res && !res.headersSent) {
-                if (typeof res.status === 'function') {
-                  // Express Response
-                  res.status(502).json({
-                    error: 'Bad Gateway',
-                    message: err.message
+
+              if (currentTarget) {
+                // 触发紧急健康检查
+                await this.proxyManager.healthChecker.checkServerUrgent(currentTarget);
+                
+                // 尝试获取新的目标
+                let newTarget: string | undefined;
+                if (location.upstream) {
+                  const balancer = this.proxyManager.getUpstreamBalancer(location.upstream);
+                  if (balancer) {
+                    // 强制刷新服务器状态
+                    await this.proxyManager.healthChecker.checkServerUrgent(currentTarget);
+                    // 获取新的服务器
+                    const server = balancer.getNextServer();
+                    if (server) {
+                      newTarget = server.url;
+                    }
+                  }
+                }
+
+                if (newTarget && newTarget !== currentTarget) {
+                  this.logger.info(`切换到新的目标服务器: ${newTarget}`);
+                  
+                  const targetUrl = new URL(newTarget);
+                  const isHttps = targetUrl.protocol === 'https:';
+                  const originalHost = req.headers.host || '';
+                  
+                  // 构建请求头
+                  const headers: Record<string, string> = {};
+                  // 复制原始请求头，过滤掉 undefined 值
+                  Object.entries(req.headers).forEach(([key, value]) => {
+                    if (value !== undefined) {
+                      headers[key] = Array.isArray(value) ? value[0] : value;
+                    }
                   });
-                } else if (typeof res.writeHead === 'function') {
-                  // HTTP ServerResponse
-                  res.writeHead(502, {
-                    'Content-Type': 'application/json'
+                  // 始终使用原始主机名
+                  headers.host = originalHost;
+                  
+                  // 重试请求
+                  const retryReq = (isHttps ? https : http).request(
+                    {
+                      hostname: targetUrl.hostname,
+                      port: targetUrl.port || (isHttps ? 443 : 80),
+                      path: req.url,
+                      method: req.method,
+                      headers,
+                      timeout: location.proxyTimeout || 30000,
+                      rejectUnauthorized: false  // 允许自签名证书
+                    },
+                    (retryRes) => {
+                      // 处理重定向
+                      if (retryRes.statusCode && retryRes.statusCode >= 300 && retryRes.statusCode < 400 && retryRes.headers.location) {
+                        const redirectUrl = new URL(retryRes.headers.location, `${isHttps ? 'https' : 'http'}://${originalHost}`);
+                        redirectUrl.host = originalHost;
+                        redirectUrl.protocol = this.config.ssl?.enabled ? 'https:' : 'http:';
+                        
+                        res.writeHead(retryRes.statusCode, {
+                          'Location': redirectUrl.toString(),
+                          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+                          'Pragma': 'no-cache',
+                          'Expires': '0',
+                          'Surrogate-Control': 'no-store'
+                        });
+                        res.end();
+                        return;
+                      }
+
+                      // 非重定向响应
+                      Object.keys(retryRes.headers).forEach(key => {
+                        res.setHeader(key, retryRes.headers[key]);
+                      });
+                      res.writeHead(retryRes.statusCode || 502);
+                      retryRes.pipe(res);
+                    }
+                  );
+
+                  retryReq.on('error', (retryErr) => {
+                    // 如果重试也失败，返回错误响应
+                    this.handleProxyError(res, retryErr);
                   });
-                  res.end(JSON.stringify({
-                    error: 'Bad Gateway',
-                    message: err.message
-                  }));
+
+                  // 设置超时
+                  retryReq.setTimeout(location.proxyTimeout || 30000, () => {
+                    retryReq.destroy();
+                    this.handleProxyError(res, new Error('Retry request timeout'));
+                  });
+
+                  if (req.body) {
+                    retryReq.write(req.body);
+                  }
+                  retryReq.end();
+                  return;
                 }
               }
             }
+
+            // 如果无法故障转移或者不是连接错误，返回错误响应
+            this.handleProxyError(res, err);
           } catch (handlerError) {
             this.logger.error('Error in proxy error handler:', handlerError);
+            this.handleProxyError(res, handlerError as Error);
           }
         },
 
@@ -507,7 +684,7 @@ export class ProxyServer extends EventEmitter {
     // 创建代理中间件
     const middleware = createProxyMiddleware(proxyOptions);
     
-    // 存储中间件以便清理
+    // 存中间件以便清理
     const middlewareKey = `${serverConfig.name}:${location.path}`;
     this.proxyMiddlewares.set(middlewareKey, middleware);
 
@@ -539,7 +716,7 @@ export class ProxyServer extends EventEmitter {
       }
     }
     
-    // 添加头部结束标记大小
+    // 添加头结束标记大小
     incomingBytes += '\r\n'.length;
 
     // 计算请求体大小
@@ -633,7 +810,7 @@ export class ProxyServer extends EventEmitter {
         this.emit('serverError', error);
       });
 
-      // 启动HTTPS服务器
+      // 动HTTPS服务器
       await this.httpsServer.start();
       
       // 保存服务器引用
@@ -758,41 +935,23 @@ export class ProxyServer extends EventEmitter {
    * 停止服务器
    */
   public async stop(): Promise<void> {
-    try {
-      // 停止 HTTPS 服务器
-      if (this.httpsServer) {
-        await this.httpsServer.stop();
-        this.httpsServer = null;
+    return new Promise<void>((resolve, reject) => {
+      if (!this.server) {
+        resolve();
+        return;
       }
 
-      // 停止普通服务器
-      if (this.server && !this.httpsServer) {
-        await new Promise<void>((resolve, reject) => {
-          this.server!.close((err) => {
-            if (err) {
-              reject(err);
-            } else {
-              this.server = null;
-              resolve();
-            }
-          });
-        });
-      }
-
-      // 清理代理中间件
-      this.proxyMiddlewares.forEach(middleware => {
-        if (typeof (middleware as any).close === 'function') {
-          (middleware as any).close();
+      this.server.close((err) => {
+        if (err) {
+          this.logger.error('关闭服务器时发生错误:', err);
+          reject(err);
+        } else {
+          this.logger.info('服务器已成功关闭');
+          this.server = null;
+          resolve();
         }
       });
-      this.proxyMiddlewares.clear();
-
-      this.logger.info('Server stopped');
-      this.emit('serverStopped');
-    } catch (error) {
-      this.logger.error('Error stopping server:', error);
-      throw error;
-    }
+    });
   }
 
   /**
@@ -815,7 +974,7 @@ export class ProxyServer extends EventEmitter {
       // 重新设置中间件和路由
       this.setupMiddleware();
 
-      // 重新启动服务器
+      // 重新动服务器
       await this.start();
 
       this.logger.info('Server configuration updated');
@@ -825,10 +984,34 @@ export class ProxyServer extends EventEmitter {
       throw error;
     }
   }
+
+  /**
+   * 处理代理错误响应
+   */
+  private handleProxyError(res: any, err: Error): void {
+    if (res && !res.headersSent) {
+      if (typeof res.status === 'function') {
+        // Express Response
+        res.status(502).json({
+          error: 'Bad Gateway',
+          message: err.message
+        });
+      } else if (typeof res.writeHead === 'function') {
+        // HTTP ServerResponse
+        res.writeHead(502, {
+          'Content-Type': 'application/json'
+        });
+        res.end(JSON.stringify({
+          error: 'Bad Gateway',
+          message: err.message
+        }));
+      }
+    }
+  }
 }
 
 /**
- * 创建代理服务器实例
+ * 创建代理服务器例
  */
 export function createServer(
   config: Config,

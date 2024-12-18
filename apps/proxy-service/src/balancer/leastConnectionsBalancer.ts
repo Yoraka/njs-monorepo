@@ -14,6 +14,7 @@ interface ServerConnection extends UpstreamServer {
  */
 export class LeastConnectionsBalancer extends BaseBalancer {
   private serverConnections: Map<string, number>;
+  private currentServer: UpstreamServer | null = null;
 
   constructor(servers: UpstreamServer[]) {
     super(servers);
@@ -21,6 +22,14 @@ export class LeastConnectionsBalancer extends BaseBalancer {
     this.initializeConnections();
   }
 
+  /**
+   * 获取当前正在使用的服务器
+   * @returns 返回当前服务器，如果没有则返回 null
+   */
+  public getCurrentServer(): UpstreamServer | null {
+    return this.currentServer;
+  }
+  
   /**
    * 获取当前连接数最少的可用服务器
    * @returns 返回连接数最少的服务器，如果没有可用服务器则返回 null

@@ -25,10 +25,12 @@
       ],
       "healthCheck": {
         "type": "http",
-        "path": "/health",
-        "interval": 3000,
+        "path": "/",
+        "interval": 1000,
         "timeout": 2000,
-        "retries": 3
+        "retries": 2,
+        "allowInsecure": true,
+        "expectedStatus": [200, 201, 202, 301, 302, 303, 307, 308, 404]
       }
     }
   ],
@@ -65,7 +67,7 @@
     }
   ],
   "logging": {
-    "level": "info",
+    "level": "debug",
     "file": "./logs/access.log"
   },
   "monitoring": {

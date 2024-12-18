@@ -12,6 +12,12 @@ export interface Balancer {
   getNextServer(): UpstreamServer | null;
 
   /**
+   * 获取当前正在使用的服务器
+   * @returns 返回当前服务器，如果没有则返回 null
+   */
+  getCurrentServer(): UpstreamServer | null;
+
+  /**
    * 更新上游服务器列表
    * @param servers 新的上游服务器列表
    */
@@ -34,6 +40,12 @@ export abstract class BaseBalancer implements Balancer {
    * 具体的选择算法由子类实现
    */
   abstract getNextServer(): UpstreamServer | null;
+
+  /**
+   * 获取当前正在使用的服务器
+   * 具体的选择算法由子类实现
+   */
+  abstract getCurrentServer(): UpstreamServer | null;
 
   /**
    * 更新上游服务器列表
