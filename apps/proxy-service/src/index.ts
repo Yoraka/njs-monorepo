@@ -4,7 +4,7 @@ import { setupLogger, updateLogger } from './logger';
 import { createMonitor } from './monitor';
 import { createHealthChecker } from './healthChecker';
 import { ProxyManager } from './proxyManager';
-import { Config, UpstreamServer } from './types';
+import { Config, UpstreamServer, LoggingConfig } from './types';
 import { Logger } from 'winston';
 import * as path from 'path';
 import { Server } from 'http';
@@ -37,10 +37,14 @@ class ProxyApplication {
     // 加载初始配置
     this.config = this.configLoader.loadConfig();
     
-    // 初始化日志记录器
-    this.logger = setupLogger(this.config.logging);
+    // 初始化日志记录器，使用默认配置如果没有指定
+    const loggingConfig: LoggingConfig = this.config.logging || {
+      level: 'info',
+      file: 'logs/access.log'
+    };
+    this.logger = setupLogger(loggingConfig);
     
-    // 初始化健康检查器
+    // 初始化健康检查��
     this.healthChecker = createHealthChecker(
       this.getAllUpstreamServers(),
       this.config.servers[0].healthCheck!, // 假设至少有一个服务器配置
@@ -87,13 +91,15 @@ class ProxyApplication {
   private async setupHotReload(): Promise<void> {
     this.configLoader.on('configUpdated', async (newConfig: Config) => {
       try {
-        this.logger.info('检测到配置文件更改，开始热重载...');
+        this.logger.info('检测到��置文件更改，开始热重载...');
 
         // 新配置
         this.config = newConfig;
 
         // 更新日志配置
-        updateLogger(this.logger, newConfig.logging);
+        if (newConfig.logging) {
+          updateLogger(this.logger, newConfig.logging);
+        }
 
         // 更新健康检查器
         this.healthChecker.updateConfig(

@@ -595,7 +595,7 @@ export class Monitor extends EventEmitter {
 
     this.startSystemMetricsCollection();
     this.logger.info('监控已启动', {
-      pushInterval: this.config.monitoring.pushInterval,
+      pushInterval: this.config.monitoring?.pushInterval || 5000,
       wsPort: this.config.monitoring?.wsPort || 3001
     });
   }
@@ -633,14 +633,15 @@ export class Monitor extends EventEmitter {
    * 启动系统指标收集
    */
   private startSystemMetricsCollection(): void {
-    // 立即收集次
+    // 立即收集一次
     this.updateSystemMetrics();
     
     // 使用固定的收集间隔，不受 pushInterval 影响
+    const interval = this.config.monitoring?.pushInterval || 5000;
     this.systemMetricsInterval = setInterval(async () => {
       await this.updateSystemMetrics();
       this.pushMetrics();
-    }, Math.min(this.config.monitoring.pushInterval || 5000, 5000)); // 最大5秒更新一次
+    }, Math.min(interval, 5000)); // 最大5秒更新一次
   }
 
   /**
@@ -662,7 +663,7 @@ export class Monitor extends EventEmitter {
   }
 
   /**
-   * 推送监控数���
+   * 推送监控数据
    */
   private pushMetrics(): void {
     const monitoringData: MonitoringData = {
@@ -944,7 +945,7 @@ export class Monitor extends EventEmitter {
   }
 
   /**
-   * 获取当前��标
+   * 获取当前指标
    */
   public getMetrics(): MonitoringData {
     return {
