@@ -5,8 +5,9 @@ export interface Config {
     upstreams: UpstreamConfig[];
     servers: ServerConfig[];
     ssl?: SSLConfig;
-    logging: LoggingConfig;
-    monitoring: MonitoringConfig;
+    logging?: LoggingConfig;
+    monitoring?: MonitoringConfig;
+    captcha?: CaptchaConfig;
   }
   
   /**
@@ -74,6 +75,11 @@ export interface Config {
   export interface IPFilterConfig {
     blacklist?: string[];
     whitelist?: string[];
+    rules?: {
+      maxRequestsPerSecond: number;
+      banDuration: number;
+      maxFailedAttempts: number;
+    };
   }
   
   /**
@@ -222,4 +228,20 @@ export interface Config {
     valid: boolean;
     errors: string[];
     warnings: string[];
+  }
+  
+  /**
+   * 人机验证配置接口
+   */
+  export interface CaptchaConfig {
+    enabled: boolean;
+    maxAttempts: number;
+    timeout: number;
+    blackholeThreshold: number;
+    banDuration: number;      // 封禁时长（毫秒）
+    google?: {
+      siteKey: string;       // Google reCAPTCHA site key
+      secretKey: string;     // Google reCAPTCHA secret key
+      minScore?: number;     // reCAPTCHA v3 最低分数要求
+    };
   }

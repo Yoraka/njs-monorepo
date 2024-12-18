@@ -13,6 +13,7 @@ import { createRateLimiter } from './rateLimiter';
 import { EventEmitter } from 'events';
 import { IncomingMessage } from 'http';
 import { HttpsServer } from './ssl/httpsServer';
+import { CaptchaManager, createCaptchaManager } from './captcha/captchaPage';
 
 // 定义通用服务器类型
 type GenericServer = Server | HTTPSServer | http2.Http2Server | ReturnType<typeof http2.createSecureServer>;
@@ -25,6 +26,7 @@ export class ProxyServer extends EventEmitter {
   private logger: Logger;
   private config: Config;
   private proxyMiddlewares: Map<string, RequestHandler> = new Map();
+  private captchaManager?: CaptchaManager;
 
   constructor(
     config: Config,
@@ -37,6 +39,12 @@ export class ProxyServer extends EventEmitter {
     this.proxyManager = proxyManager;
     this.logger = logger;
     this.app = express();
+    
+    // 初始化人机验证管理器
+    if (config.captcha?.enabled) {
+      this.captchaManager = createCaptchaManager(config.captcha);
+    }
+    
     this.setupMiddleware();
   }
 
@@ -47,6 +55,13 @@ export class ProxyServer extends EventEmitter {
     // 基础中间件
     this.app.use(express.json());
     this.app.use(express.urlencoded({ extended: true }));
+
+    // 如果启用了人机验证，添加验证路由
+    if (this.captchaManager) {
+      this.app.post('/verify-captcha', (req, res) => {
+        this.captchaManager!.handleVerification(req, res);
+      });
+    }
 
     // 错误处理中间件
     this.app.use(this.errorHandler.bind(this));
@@ -85,7 +100,7 @@ export class ProxyServer extends EventEmitter {
     // IP 过滤中间件
     const ipFilter = location.ipFilter || serverConfig.ipFilter;
     if (ipFilter) {
-      middlewares.push(createIPFilter(ipFilter, this.logger));
+      middlewares.push(createIPFilter(ipFilter, this.logger, this.captchaManager));
     }
 
     // 速率限制中间件
@@ -322,7 +337,7 @@ export class ProxyServer extends EventEmitter {
           try {
             this.logger.debug(`Proxy request started: ${req.method} ${req.url}`);
 
-            // POST 请求体处理
+            // POST 请求��处理
             if (req.method === 'POST' && req.body) {
               let bodyData = req.body;
               if (typeof bodyData !== 'string') {

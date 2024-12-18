@@ -25,7 +25,7 @@ export class ConfigLoader extends EventEmitter {
   /**
    * 默认配置
    */
-  private static readonly DEFAULT_CONFIG: Config = {
+  private static readonly DEFAULT_CONFIG: Required<Config> = {
     upstreams: [{
       name: 'default_backend',
       balancer: 'round-robin',
@@ -39,7 +39,7 @@ export class ConfigLoader extends EventEmitter {
       listen: 9000,
       locations: [{
         path: '/',
-        upstream: 'default_backend',  // 引用默认的 upstream
+        upstream: 'default_backend',
         balancer: 'round-robin'
       }]
     }],
@@ -52,6 +52,23 @@ export class ConfigLoader extends EventEmitter {
       wsPort: 3001,
       pushInterval: 1000,
       metrics: ['cpuUsage', 'memoryUsage', 'serverMetrics']
+    },
+    captcha: {
+      enabled: true,
+      maxAttempts: 5,
+      timeout: 300000,  // 5分钟
+      blackholeThreshold: 10,  // 10次失败后进入黑洞
+      banDuration: 900000,  // 15分钟封禁时长
+      google: {
+        siteKey: process.env.RECAPTCHA_SITE_KEY || '',
+        secretKey: process.env.RECAPTCHA_SECRET_KEY || '',
+        minScore: 0.5  // reCAPTCHA v3 最低分数要求
+      }
+    },
+    ssl: {
+      enabled: false,
+      cert: '',
+      key: ''
     }
   };
 
@@ -133,7 +150,7 @@ export class ConfigLoader extends EventEmitter {
   }
 
   /**
-   * 将用户配置与默认配置合并
+   * 将用户配置与默认配置合
    * @param userConfig 用户配置
    * @returns 合并后的配置
    */
@@ -141,21 +158,36 @@ export class ConfigLoader extends EventEmitter {
     this.logger.debug('Merging user config:', JSON.stringify(userConfig, null, 2));
     this.logger.debug('Default config:', JSON.stringify(ConfigLoader.DEFAULT_CONFIG, null, 2));
 
-    const mergedConfig = {
+    // 确保必需的配置字段存在
+    const mergedConfig: Config = {
       upstreams: this.mergeUpstreamConfigs(userConfig.upstreams || ConfigLoader.DEFAULT_CONFIG.upstreams),
       servers: this.mergeServerConfigs(userConfig.servers || ConfigLoader.DEFAULT_CONFIG.servers),
       ssl: this.mergeSSLConfig(userConfig.ssl),
       logging: {
-        ...ConfigLoader.DEFAULT_CONFIG.logging,
-        ...userConfig.logging
+        level: userConfig.logging?.level || ConfigLoader.DEFAULT_CONFIG.logging.level,
+        file: userConfig.logging?.file || ConfigLoader.DEFAULT_CONFIG.logging.file
       },
       monitoring: {
-        ...ConfigLoader.DEFAULT_CONFIG.monitoring,
-        ...userConfig.monitoring,
-        metrics: [
-          ...(ConfigLoader.DEFAULT_CONFIG.monitoring.metrics || []),
+        enabled: userConfig.monitoring?.enabled ?? ConfigLoader.DEFAULT_CONFIG.monitoring.enabled,
+        wsPort: userConfig.monitoring?.wsPort || ConfigLoader.DEFAULT_CONFIG.monitoring.wsPort,
+        pushInterval: userConfig.monitoring?.pushInterval || ConfigLoader.DEFAULT_CONFIG.monitoring.pushInterval,
+        metrics: Array.from(new Set([
+          ...ConfigLoader.DEFAULT_CONFIG.monitoring.metrics,
           ...(userConfig.monitoring?.metrics || [])
-        ]
+        ]))
+      },
+      // 合并人机验证配置，确保默认启用
+      captcha: {
+        enabled: userConfig.captcha?.enabled ?? true,
+        maxAttempts: userConfig.captcha?.maxAttempts ?? ConfigLoader.DEFAULT_CONFIG.captcha.maxAttempts,
+        timeout: userConfig.captcha?.timeout ?? ConfigLoader.DEFAULT_CONFIG.captcha.timeout,
+        blackholeThreshold: userConfig.captcha?.blackholeThreshold ?? ConfigLoader.DEFAULT_CONFIG.captcha.blackholeThreshold,
+        banDuration: userConfig.captcha?.banDuration ?? ConfigLoader.DEFAULT_CONFIG.captcha.banDuration,
+        google: userConfig.captcha?.google ? {
+          siteKey: userConfig.captcha.google.siteKey || ConfigLoader.DEFAULT_CONFIG.captcha.google!.siteKey,
+          secretKey: userConfig.captcha.google.secretKey || ConfigLoader.DEFAULT_CONFIG.captcha.google!.secretKey,
+          minScore: userConfig.captcha.google.minScore ?? ConfigLoader.DEFAULT_CONFIG.captcha.google!.minScore
+        } : ConfigLoader.DEFAULT_CONFIG.captcha.google
       }
     };
 
@@ -383,7 +415,7 @@ export class ConfigLoader extends EventEmitter {
   }
 
   /**
-   * 验证配置对象的有效性
+   * 验证��置对象的有效性
    */
   private async validateConfig(config: Config): Promise<void> {
     // 验证 upstreams
@@ -490,7 +522,7 @@ export function createConfigLoader(configPath: string, logger: Logger): ConfigLo
 // 这个实现包含以下主要特点：
 // 配置加载和解析:
 // 使用 fs.readFileSync 读取配置文件
-// JSON 解析和验证
+// JSON 解��和验证
 // 详细的错误处理和日志记录
 // 配置验证:
 // 验证所有必需的配置字段
