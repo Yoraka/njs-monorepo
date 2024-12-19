@@ -25,6 +25,20 @@ export interface ProxyServer {
   updateConfig(config: Config): Promise<void>;
 }
 
+function unifyDomain(host: string): { hostname: string; port?: string } {
+  // 去掉首尾空格
+  const trimmed = (host || '').trim().toLowerCase();
+
+  // 若没有冒号，则仅仅表示域名，端口可能在 DNS 中
+  if (!trimmed.includes(':')) {
+    return { hostname: trimmed };
+  }
+
+  // 若包含端口，拆分
+  const [hostname, port] = trimmed.split(':', 2);
+  return { hostname, port };
+}
+
 export class ProxyServer extends EventEmitter implements ProxyServer {
   private app: Express;
   private server: GenericServer | null = null;
@@ -255,7 +269,7 @@ export class ProxyServer extends EventEmitter implements ProxyServer {
       if (protocol === 'https:') {
         return new https.Agent({
           ...baseOptions,
-          rejectUnauthorized: false  // 允许名证书
+          rejectUnauthorized: false  // 允许自签名证书
         });
       }
       return new http.Agent(baseOptions);
@@ -275,7 +289,7 @@ export class ProxyServer extends EventEmitter implements ProxyServer {
       // 基础设置
       xfwd: false,
       preserveHeaderKeyCase: true,
-      followRedirects: false,  // 禁用自动重定，手动处理HTTPS重定向以支持降级到HTTP
+      followRedirects: false,  // 禁用自动重定向，手动处理HTTPS重定向以支持降级到HTTP
       
       cookieDomainRewrite: {
         '*': '' 
@@ -288,10 +302,7 @@ export class ProxyServer extends EventEmitter implements ProxyServer {
       proxyTimeout: location.proxyTimeout || 30000,
       timeout: location.proxyTimeout || 30000,
 
-      // 路径重写（如果配置了）
-      // pathRewrite: location.pathRewrite,
-      
-      // 修改路由逻辑
+      // 路由逻辑
       router: async (req) => {
         try {
           let target: string;
@@ -316,10 +327,34 @@ export class ProxyServer extends EventEmitter implements ProxyServer {
             if (!server) {
               throw new Error(`No available servers in upstream: ${location.upstream}`);
             }
+
+            // 确保服务器属于当前 upstream
+            if (server._upstream !== location.upstream) {
+              throw new Error(`Server ${server.url} does not belong to upstream ${location.upstream}`);
+            }
+
+            target = server.url;
+          } else if (location.targets) {
+            // 向后兼容：使用旧的目标选择逻辑
+            const balancerKey = `${serverConfig.name}:${location.path}`;
+            const balancer = this.proxyManager.getUpstreamBalancer(balancerKey);
+            if (!balancer) {
+              throw new Error(`No balancer found for location: ${location.path}`);
+            }
+            
+            const server = balancer.getNextServer();
+            if (!server) {
+              throw new Error(`No available servers for location: ${location.path}`);
+            }
+
+            // 确保服务器属于当前 location
+            if (server._location !== `${serverConfig.name}:${location.path}`) {
+              throw new Error(`Server ${server.url} does not belong to location ${location.path}`);
+            }
+
             target = server.url;
           } else {
-            // 向后兼容：使用旧的目标选择逻辑
-            target = await this.proxyManager.getTarget(serverConfig, location, req as Request);
+            throw new Error(`No proxy target specified for location: ${location.path}`);
           }
 
           // 确保使用 IPv4
@@ -384,96 +419,60 @@ export class ProxyServer extends EventEmitter implements ProxyServer {
           }
 
           // 处理重定向
-          if (proxyRes.statusCode && proxyRes.statusCode >= 300 && proxyRes.statusCode < 400 && proxyRes.headers.location) {
-            const locationHeader = proxyRes.headers.location;
-            const hasSSL = this.config.ssl?.enabled;
-            const originalHost = req.headers.host || '';
-
-            // 获取当前目标服务器信息
-            let currentServer: { url: string; backup?: boolean } | null = null;
-            if (location.upstream) {
-              const balancer = this.proxyManager.getUpstreamBalancer(location.upstream);
-              if (balancer) {
-                currentServer = balancer.getCurrentServer();
-              }
-            } else if (location.proxy_pass) {
-              currentServer = { url: location.proxy_pass };
-            }
-
+          const locationHeader = proxyRes.headers['location'] as string | undefined;
+          if (locationHeader) {
             try {
-              const redirectUrl = new URL(locationHeader);
+              const redirectUrl = new URL(locationHeader, `http://${req.headers.host}`);
+              const originalHost = req.headers.host || '';
               
               // 判断是否是备用服务器的外部重定向
+              const upstream = location.upstream ?? '';
+              const currentServer = this.proxyManager.getUpstreamBalancer(upstream)?.getCurrentServer();
               const isBackupServer = currentServer?.backup === true;
-              const isExternalRedirect = originalHost && redirectUrl.host !== originalHost;
-              
-              // 记录重定向信息
-              this.logger.debug('重定向详情:', {
-                originalUrl: `${req.method} ${req.url}`,
-                locationHeader,
+
+              // 统一域名，判断是否是同一域名(忽略大小写、可自定义忽略端口或不忽略)
+              const unifyOrig = unifyDomain(originalHost);
+              const unifyRedir = unifyDomain(redirectUrl.host);
+
+              // 如果 hostname 相同，并且都存在端口则可再做深度检查
+              // 这里根据需求决定是否只要域名一样即可算同域
+              const isSameDomain =
+                unifyOrig.hostname === unifyRedir.hostname;
+
+              // 如果希望连端口也要一致，则可以改成：
+              // const isSameDomain = unifyOrig.hostname === unifyRedir.hostname
+              //   && unifyOrig.port === unifyRedir.port;
+
+              // 综合判断
+              const isExternalRedirect = !isSameDomain;
+
+              // 日志记录
+              this.logger.debug(`重定向判定: originalHost=${originalHost}, redirectUrl=${redirectUrl.href}`, {
+                unifyOrig,
+                unifyRedir,
                 isBackupServer,
-                isExternalRedirect,
-                currentServer: currentServer?.url,
-                originalHost
+                isExternalRedirect
               });
 
+              // 如果是备用服务器且识别为外部重定向，可以特殊处理
               if (isBackupServer && isExternalRedirect) {
-                // 如果是备用服务器的外部重定向，直接透传，不改写
-                this.logger.debug(`备用服务器外部重定向，保持原始地址: ${locationHeader}`);
-                res.setHeader('Location', locationHeader);
-                
-                // 添加响应头指示这是备用服务器的重定向
-                res.setHeader('X-Proxy-Backup-Redirect', 'true');
-                
-                // 发送响应
-                res.writeHead(proxyRes.statusCode);
-                res.end();
-                return;
+                this.logger.warn(`外部重定向 (备用服务器)，可能指向非代理域，或会导致不可用: ${redirectUrl.href}`);
+                // 这里是否要直接结束请求或放行到外部，看你业务需求
               }
 
-              // 处理相对路径重定向
-              if (locationHeader.startsWith('/')) {
-                const newLocation = `${hasSSL ? 'https' : 'http'}://${originalHost}${locationHeader}`;
+              // 如果确认为同域，则可以直接放行或重写 location
+              if (!isExternalRedirect && locationHeader.startsWith('/')) {
+                // 仅当返回的是相对路径，如 /login
+                const protocol = currentServer?.url.startsWith('https') ? 'https' : 'http';
+                const newLocation = `${protocol}://${originalHost}${locationHeader}`;
                 this.logger.debug(`相对路径重定向，改写为: ${newLocation}`);
-                res.setHeader('Location', newLocation);
-                res.writeHead(proxyRes.statusCode);
-                res.end();
-                return;
+                proxyRes.headers['location'] = newLocation;
               }
-
-              // 处理内部重定向（同域名）
-              if (redirectUrl.host === originalHost) {
-                this.logger.debug(`内部重定向，保持原始协议和主机名: ${locationHeader}`);
-                // 保持原有的重定向地址
-                res.setHeader('Location', locationHeader);
-                res.writeHead(proxyRes.statusCode);
-                res.end();
-                return;
-              }
-
-              // 其他情况：非备用服务器的外部重定向
-              // 改写为原始域名，但保持路径和查询参数
-              redirectUrl.host = originalHost;
-              redirectUrl.protocol = hasSSL ? 'https:' : 'http:';
-              const newLocation = redirectUrl.toString();
-              
-              this.logger.debug(`标准重定向处理，改写为: ${newLocation}`);
-              res.setHeader('Location', newLocation);
-              res.writeHead(proxyRes.statusCode);
-              res.end();
 
             } catch (error) {
-              // URL 解析失败，假设是相对路径
-              const newLocation = `${hasSSL ? 'https' : 'http'}://${originalHost}${
-                locationHeader.startsWith('/') ? locationHeader : `/${locationHeader}`
-              }`;
-              
-              this.logger.debug(`URL解析失败，处理为相对路径: ${newLocation}`, error);
-              res.setHeader('Location', newLocation);
-              res.writeHead(proxyRes.statusCode);
-              res.end();
+              // 防御性错误处理
+              this.logger.debug(`locationHeader 不是合法的 URL: ${locationHeader}`, { error });
             }
-            return;
           }
 
           // 监控响应数据
@@ -764,15 +763,20 @@ export class ProxyServer extends EventEmitter implements ProxyServer {
    */
   public async start(): Promise<void> {
     try {
-      // 从配置中获取端口，如果没有则使用默认值
-      const port = this.config.servers[0].listen || 3000;
+      // 启动所有配置的服务器
+      for (const serverConfig of this.config.servers) {
+        const port = serverConfig.listen;
+        
+        if (this.config.ssl && this.config.ssl.enabled) {
+          await this.startHttpsServer(port);
+        } else {
+          // 强制使用 IPv4
+          const server = this.app.listen(port, '0.0.0.0');
+          this.setupServerEvents(server);
+          this.server = server; // 保持对最后一个服务器的引用以兼容现有代码
+        }
 
-      if (this.config.ssl && this.config.ssl.enabled) {
-        await this.startHttpsServer(port);
-      } else {
-        // 强制使用 IPv4
-        this.server = this.app.listen(port, '0.0.0.0');
-        this.setupServerEvents(this.server);
+        this.logger.info(`Server ${serverConfig.name} started on port ${port}`);
       }
 
     } catch (error) {

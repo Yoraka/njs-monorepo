@@ -2,6 +2,8 @@ import { Balancer } from './balancer';
 import { RoundRobinBalancer } from './roundRobinBalancer';
 import { LeastConnectionsBalancer } from './leastConnectionsBalancer';
 import { LocationConfig, UpstreamServer } from '../types';
+import { Logger } from 'winston';
+import * as winston from 'winston';
 
 /**
  * 负载均衡器配置接口
@@ -10,6 +12,7 @@ export interface BalancerConfig {
   balancer: string;
   targets: UpstreamServer[];
   path?: string;  // 可选，用于 location 配置
+  logger?: Logger; // 添加 logger 参数
 }
 
 /**
@@ -26,10 +29,17 @@ export enum BalancerType {
  */
 export class BalancerFactory {
   private static balancers: Map<string, Balancer> = new Map();
+  private static defaultLogger = winston.createLogger({
+    level: 'warn',
+    format: winston.format.json(),
+    transports: [
+      new winston.transports.Console()
+    ]
+  });
 
   /**
    * 创建或获取负载均衡器实例
-   * @param location 位置配置
+   * @param config 负载均衡器配置
    * @returns 负载均衡器实例
    * @throws Error 如果指定了未知的负载均衡算法
    */
@@ -44,14 +54,14 @@ export class BalancerFactory {
     }
 
     // 创建新的负载均衡器实例
-    const newBalancer = this.createNewBalancer(config.balancer, config.targets);
+    const newBalancer = this.createNewBalancer(config.balancer, config.targets, config.logger);
     this.balancers.set(balancerKey, newBalancer);
     return newBalancer;
   }
 
   /**
    * 更新指定路径的负载均衡器配置
-   * @param location 位置配置
+   * @param config 负载均衡器配置
    * @returns 更新后的负载均衡器实例
    */
   public static updateBalancer(config: BalancerConfig): Balancer {
@@ -74,13 +84,16 @@ export class BalancerFactory {
    * 创建新的负载均衡器实例
    * @param type 负载均衡器类型
    * @param servers 上游服务器列表
+   * @param logger 日志记录器
    * @returns 新的负载均衡器实例
    * @throws Error 如果指定了未知的负载均衡算法
    */
-  private static createNewBalancer(type: string, servers: UpstreamServer[]): Balancer {
+  private static createNewBalancer(type: string, servers: UpstreamServer[], logger?: Logger): Balancer {
+    const actualLogger = logger || this.defaultLogger;
+    
     switch (type.toLowerCase()) {
       case BalancerType.ROUND_ROBIN:
-        return new RoundRobinBalancer(servers);
+        return new RoundRobinBalancer(servers, actualLogger);
       
       case BalancerType.LEAST_CONNECTIONS:
         return new LeastConnectionsBalancer(servers);

@@ -83,9 +83,7 @@ export class ConfigLoader extends EventEmitter {
     retries: 3,
     enabled: true,
     headers: {},
-    expectedStatus: [200],
-    followRedirects: true,
-    allowInsecure: false
+    expectedStatus: [200]
   };
 
   /**
@@ -132,7 +130,16 @@ export class ConfigLoader extends EventEmitter {
       
       this.logger.debug('Parsed config:', JSON.stringify(config, null, 2));
       
-      const mergedConfig = this.mergeWithDefaults(config);
+      // 保留原始配置的结构，只合并必要的默认值
+      const mergedConfig = {
+        ...config,
+        upstreams: this.mergeUpstreamConfigs(config.upstreams || []),
+        servers: this.mergeServerConfigs(config.servers || []),
+        ssl: config.ssl ? this.mergeSSLConfig(config.ssl) : undefined,
+        logging: config.logging || ConfigLoader.DEFAULT_CONFIG.logging,
+        monitoring: config.monitoring || ConfigLoader.DEFAULT_CONFIG.monitoring,
+        captcha: config.captcha || ConfigLoader.DEFAULT_CONFIG.captcha
+      };
       
       this.logger.debug('Pre-validation config:', JSON.stringify(mergedConfig, null, 2));
       
@@ -144,6 +151,11 @@ export class ConfigLoader extends EventEmitter {
       return mergedConfig;
     } catch (error) {
       this.logger.error(`Failed to load config file: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      // 如果配置文件存在但处理失败，保持原有配置
+      if (this.currentConfig) {
+        this.logger.info('Keeping current configuration');
+        return this.currentConfig;
+      }
       this.logger.info('Falling back to default configuration');
       return ConfigLoader.DEFAULT_CONFIG;
     }
@@ -255,20 +267,34 @@ export class ConfigLoader extends EventEmitter {
       defaultUpstream
     });
 
-    const mergedUpstreams = userUpstreams.map(upstream => ({
-      name: upstream.name,
-      balancer: upstream.balancer || defaultUpstream.balancer,
-      servers: upstream.servers.map(server => ({
-        url: server.url,
-        weight: server.weight || 1,
-        backup: server.backup || false,
-        down: server.down || false
-      })),
-      healthCheck: upstream.healthCheck ? {
+    const mergedUpstreams = userUpstreams.map(upstream => {
+      // 合并 upstream 级别的 healthCheck
+      const upstreamHealthCheck = upstream.healthCheck ? {
         ...ConfigLoader.DEFAULT_HEALTH_CHECK,
         ...upstream.healthCheck
-      } : undefined
-    }));
+      } : undefined;
+
+      return {
+        name: upstream.name,
+        balancer: upstream.balancer || defaultUpstream.balancer,
+        servers: upstream.servers.map(server => {
+          // 合并 server 级别的 healthCheck，继承 upstream 级别的配置
+          const serverHealthCheck = server.healthCheck ? {
+            ...(upstreamHealthCheck || ConfigLoader.DEFAULT_HEALTH_CHECK),
+            ...server.healthCheck
+          } : upstreamHealthCheck;
+
+          return {
+            url: server.url,
+            weight: server.weight || 1,
+            backup: server.backup || false,
+            down: server.down || false,
+            healthCheck: serverHealthCheck
+          };
+        }),
+        healthCheck: upstreamHealthCheck
+      };
+    });
 
     this.logger.debug('Merged upstreams:', mergedUpstreams);
 
@@ -415,10 +441,10 @@ export class ConfigLoader extends EventEmitter {
   }
 
   /**
-   * 验证��置对象的有效性
+   * 验证配置对象的有效性
    */
   private async validateConfig(config: Config): Promise<void> {
-    // 验证 upstreams
+    // ��证 upstreams
     if (!config.upstreams || !Array.isArray(config.upstreams) || config.upstreams.length === 0) {
       throw new Error('Config must contain at least one upstream');
     }
@@ -507,6 +533,25 @@ export class ConfigLoader extends EventEmitter {
     // 添加日志输出，帮助调试
     this.logger.debug('Config validation passed. Available upstreams:', Array.from(upstreamNames));
   }
+
+  private async validateUpstreams(config: Config) {
+    config.upstreams.forEach((upstream, index) => {
+      // 如果 healthCheck 字段缺失，填充默认值
+      if (!upstream.healthCheck) {
+        upstream.healthCheck = { ...ConfigLoader.DEFAULT_HEALTH_CHECK };
+      }
+
+      // 只设置必要的默认值
+      if (typeof upstream.healthCheck.enabled === 'undefined') {
+        upstream.healthCheck.enabled = true;
+      }
+
+      // 如果代码要�� upstream.name 必须与 server.name 不重复，可在此做检查
+      // if (config.servers.some(s => s.name === upstream.name)) {
+      //   throw new Error(`Upstream name "${upstream.name}" conflicts with a server name!`);
+      // }
+    });
+  }
 }
 
 /**
@@ -522,7 +567,7 @@ export function createConfigLoader(configPath: string, logger: Logger): ConfigLo
 // 这个实现包含以下主要特点：
 // 配置加载和解析:
 // 使用 fs.readFileSync 读取配置文件
-// JSON 解��和验证
+// JSON 解析和验证
 // 详细的错误处理和日志记录
 // 配置验证:
 // 验证所有必需的配置字段

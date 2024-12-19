@@ -22,6 +22,12 @@ export interface Balancer {
    * @param servers 新的上游服务器列表
    */
   updateServers(servers: UpstreamServer[]): void;
+
+  /**
+   * 获取所有可用的服务器
+   * @returns 返回可用的服务器列表
+   */
+  getAvailableServers(): UpstreamServer[];
 }
 
 /**
@@ -69,7 +75,7 @@ export abstract class BaseBalancer implements Balancer {
    * 获取所有可用的服务器
    * @returns 可用服务器列表
    */
-  protected getAvailableServers(): UpstreamServer[] {
+  getAvailableServers(): UpstreamServer[] {
     return this.servers.filter(server => this.isServerAvailable(server));
   }
 

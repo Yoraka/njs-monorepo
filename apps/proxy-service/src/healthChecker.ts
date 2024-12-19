@@ -186,29 +186,24 @@ export class HealthChecker extends EventEmitter {
       // 优先使用服务器自己的健康检查配置
       const serverConfig = server.healthCheck || this.config;
       
-      // 如果配置了健康检查路径，使用配置的路径
-      // 否则使用URL中的原始路径，如果原始路径为空则使用根路径
       const checkPath = serverConfig.path || url.pathname || '/';
-      
-      // 保持原始URL的查询参数
       const searchParams = url.search || '';
       
       const options = {
         hostname: url.hostname,
         port: url.port || (url.protocol === 'https:' ? 443 : 80),
-        path: checkPath + searchParams,  // 加入查询参数
-        timeout: serverConfig.timeout || this.config.timeout || 5000,  // 确保有默认值
+        path: checkPath + searchParams,
+        timeout: serverConfig.timeout || this.config.timeout || 5000,
         method: 'GET',
         headers: {
           ...this.config.headers,
           'User-Agent': 'HealthChecker/1.0',
-          'Host': url.host,  // 添加 Host 头，某些服务器可能需要
+          'Host': url.host,
           'Accept': '*/*',
-          'Connection': 'close'  // 确保连接关闭
+          'Connection': 'close'
         },
-        // HTTPS 选项
-        rejectUnauthorized: false,  // 不验证证书
-        agent: false  // 禁用 keep-alive
+        rejectUnauthorized: false,
+        agent: false
       };
 
       this.logger.debug(`Starting health check for ${server.url}`, {
@@ -220,11 +215,7 @@ export class HealthChecker extends EventEmitter {
         }
       });
 
-      // 处理重定向的最大次数
-      let redirectCount = 0;
-      const MAX_REDIRECTS = 5;
-
-      const makeRequest = (requestUrl: string, redirectCount: number) => {
+      const makeRequest = (requestUrl: string) => {
         const currentUrl = new URL(requestUrl);
         const isHttps = currentUrl.protocol === 'https:';
         
@@ -239,104 +230,62 @@ export class HealthChecker extends EventEmitter {
           }
         };
 
-        this.logger.debug(`Making request to ${requestUrl}`, {
-          attempt: redirectCount + 1,
-          options: currentOptions
-        });
-
-        const requestCallback = (res: http.IncomingMessage) => {
-          this.logger.debug(`Received response from ${requestUrl}`, {
-            statusCode: res.statusCode,
-            headers: res.headers
-          });
-
-          // 处理重定向
-          if ([301, 302, 307, 308].includes(res.statusCode || 0) && res.headers.location && redirectCount < MAX_REDIRECTS) {
-            const location = new URL(res.headers.location, requestUrl);
-            this.logger.debug(`Following redirect for ${server.url} to ${location.href}`, {
-              redirectCount: redirectCount + 1,
-              maxRedirects: MAX_REDIRECTS,
-              location: location.href
-            });
-            makeRequest(location.href, redirectCount + 1);
-            return;
-          }
-
-          // 检查状态码是否在预期范围内
-          const expectedStatus = serverConfig.expectedStatus || this.config.expectedStatus || [200, 301, 302, 404];
-          const isValidStatus = expectedStatus.includes(res.statusCode || 500);
-
-          if (isValidStatus) {
-            let body = '';
-            res.on('data', chunk => { body += chunk; });
-            res.on('end', () => {
-              // 如果配置了期望的响应体，则进行检查
-              if (serverConfig.expectedBody) {
-                const pattern = typeof serverConfig.expectedBody === 'string' 
-                  ? new RegExp(serverConfig.expectedBody)
-                  : serverConfig.expectedBody;
-                const matches = pattern.test(body);
-                this.logger.debug(`Checking response body for ${server.url}`, {
-                  pattern: serverConfig.expectedBody.toString(),
-                  matches,
-                  bodyPreview: body.substring(0, 200)
-                });
-                resolve(matches);
-              } else {
-                this.logger.debug(`Health check successful for ${server.url}`, {
-                  statusCode: res.statusCode,
-                  bodyLength: body.length
-                });
-                resolve(true);
-              }
-            });
-          } else {
-            this.logger.debug(`Health check failed for ${server.url}`, {
-              expectedStatus,
-              actualStatus: res.statusCode,
-              checkPath: currentOptions.path,
-              redirectCount,
-              headers: res.headers
-            });
-            resolve(false);
-          }
-        };
-
         const request = (isHttps ? https : http).request(
           currentOptions,
-          requestCallback
+          (res) => {
+            this.logger.debug(`Received response from ${requestUrl}`, {
+              statusCode: res.statusCode,
+              headers: res.headers
+            });
+
+            // 如果是 3xx，就直接视为健康，不跟随重定向
+            if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400) {
+              this.logger.debug(`服务器 ${server.url} 返回 3xx (重定向)，视为健康`);
+              resolve(true);
+              return;
+            }
+
+            // 检查状态码是否在预期范围内
+            const expectedStatus = serverConfig.expectedStatus || this.config.expectedStatus || [200, 301, 302, 404];
+            const isValidStatus = expectedStatus.includes(res.statusCode || 500);
+
+            if (isValidStatus) {
+              this.logger.debug(`Health check successful for ${server.url}`, {
+                statusCode: res.statusCode
+              });
+              resolve(true);
+            } else {
+              this.logger.debug(`Health check failed for ${server.url}`, {
+                expectedStatus,
+                actualStatus: res.statusCode,
+                checkPath: currentOptions.path
+              });
+              resolve(false);
+            }
+          }
         );
 
-        request.on('error', (error: NodeJS.ErrnoException) => {
+        request.on('error', (error) => {
           this.logger.debug(`Health check request failed for ${server.url}:`, {
             error: error.message,
-            code: error.code,
-            checkPath: currentOptions.path,
-            options: currentOptions,
-            isHttps,
-            redirectCount
+            code: (error as NodeJS.ErrnoException).code,
+            checkPath: currentOptions.path
           });
           resolve(false);
         });
 
         request.on('timeout', () => {
           request.destroy();
-          this.logger.debug(`Health check timeout for ${server.url}`, {
-            timeout: currentOptions.timeout,
-            checkPath: currentOptions.path,
-            redirectCount
-          });
+          this.logger.debug(`Health check timeout for ${server.url}`);
           resolve(false);
         });
 
-        // 设置请求超时
         request.setTimeout(options.timeout);
-
         request.end();
       };
 
-      // 开始第一个请求
-      makeRequest(server.url, 0);
+      // 不跟随重定向，直接发一次请求即可
+      makeRequest(server.url);
     });
   }
 

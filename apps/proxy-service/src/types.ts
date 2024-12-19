@@ -50,6 +50,8 @@ export interface Config {
       add?: { [key: string]: string };
       remove?: string[];
     };
+    _upstream?: string;  // 内部使用：服务器所属的 upstream 名称
+    _location?: string;  // 内部使用：服务器所属的 location 标识
   }
   
   /**
@@ -179,7 +181,7 @@ export interface Config {
   }
   
   /**
-   * 系统指标接口
+   * 系统指标接���
    */
   export interface SystemMetrics {
     cpuUsage: number;

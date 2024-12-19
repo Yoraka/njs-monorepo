@@ -1,0 +1,22 @@
+{
+    "name": "ddos_test",
+    "listen": 9004,
+    "serverName": ["ddostest.local"],
+    "locations": [
+      {
+        "path": "/",
+        "upstream": "backend_servers",
+        "rateLimit": {
+          "rate": 5,
+          "burst": 10,
+          "nodelay": false
+        },
+        "ipFilter": {
+          "whitelist": ["127.0.0.1"],
+          "blacklist": [],
+          "maxRequestsPerSecond": 3,
+          "banDuration": 300000
+        }
+      }
+    ]
+  }

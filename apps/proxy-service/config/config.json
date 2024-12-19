@@ -7,20 +7,58 @@
         {
           "url": "http://127.0.0.1:3000",
           "weight": 1,
-          "headers": {
-            "add": {
-              "X-Proxy-By": "njs-proxy",
-              "X-Real-IP": "${remote_addr}"
-            },
-            "remove": [
-              "X-Powered-By"
-            ]
+          "backup": false,
+          "down": false,
+          "healthCheck": {
+            "type": "http",
+            "path": "/",
+            "interval": 1000,
+            "timeout": 2000,
+            "retries": 2,
+            "enabled": true,
+            "headers": {},
+            "expectedStatus": [
+              200,
+              201,
+              202,
+              301,
+              302,
+              303,
+              307,
+              308,
+              404
+            ],
+            "allowInsecure": true,
+            "followRedirects": false
           }
         },
         {
           "url": "http://scu.edu.cn",
           "weight": 1,
-          "backup": true
+          "backup": true,
+          "down": false,
+          "healthCheck": {
+            "type": "http",
+            "path": "/",
+            "interval": 1000,
+            "timeout": 2000,
+            "retries": 2,
+            "enabled": true,
+            "headers": {},
+            "expectedStatus": [
+              200,
+              201,
+              202,
+              301,
+              302,
+              303,
+              307,
+              308,
+              404
+            ],
+            "allowInsecure": true,
+            "followRedirects": false
+          }
         }
       ],
       "healthCheck": {
@@ -29,45 +67,184 @@
         "interval": 1000,
         "timeout": 2000,
         "retries": 2,
+        "enabled": true,
+        "headers": {},
+        "expectedStatus": [
+          200,
+          201,
+          202,
+          301,
+          302,
+          303,
+          307,
+          308,
+          404
+        ],
         "allowInsecure": true,
-        "expectedStatus": [200, 201, 202, 301, 302, 303, 307, 308, 404]
+        "followRedirects": false
       }
+    },
+    {
+      "name": "new_upstream",
+      "balancer": "round-robin",
+      "servers": [
+        {
+          "url": "http://baidu.com",
+          "weight": 1,
+          "backup": false,
+          "down": false
+        }
+      ]
+    },
+    {
+      "name": "load_balance_test",
+      "balancer": "round-robin",
+      "servers": [
+        {
+          "url": "http://127.0.0.1:5001",
+          "weight": 1,
+          "backup": false,
+          "down": false,
+          "healthCheck": {
+            "type": "http",
+            "path": "/",
+            "interval": 1000,
+            "timeout": 2000,
+            "retries": 2,
+            "enabled": true,
+            "headers": {},
+            "expectedStatus": [
+              200
+            ]
+          }
+        },
+        {
+          "url": "http://127.0.0.1:5002",
+          "weight": 1,
+          "backup": false,
+          "down": false,
+          "healthCheck": {
+            "type": "http",
+            "path": "/",
+            "interval": 1000,
+            "timeout": 2000,
+            "retries": 2,
+            "enabled": true,
+            "headers": {},
+            "expectedStatus": [
+              200
+            ]
+          }
+        },
+        {
+          "url": "http://127.0.0.1:5003",
+          "weight": 1,
+          "backup": false,
+          "down": false,
+          "healthCheck": {
+            "type": "http",
+            "path": "/",
+            "interval": 1000,
+            "timeout": 2000,
+            "retries": 2,
+            "enabled": true,
+            "headers": {},
+            "expectedStatus": [
+              200
+            ]
+          }
+        }
+      ],
+      "healthCheck": {
+        "type": "http",
+        "path": "/",
+        "interval": 1000,
+        "timeout": 2000,
+        "retries": 2,
+        "enabled": true,
+        "headers": {},
+        "expectedStatus": [
+          200
+        ]
+      }
+    },
+    {
+      "name": "stress_test",
+      "balancer": "round-robin",
+      "servers": [
+        {
+          "url": "http://127.0.0.1:6000",
+          "weight": 1,
+          "backup": false,
+          "down": false
+        }
+      ]
     }
   ],
   "servers": [
     {
-      "name": "defaultA",
+      "name": "default",
       "listen": 9000,
       "serverName": [
         "wm-proxy.com"
       ],
       "locations": [
         {
+          "path": "/out",
+          "upstream": "new_upstream",
+          "balancer": "round-robin",
+          "proxyTimeout": 5000,
+          "proxyBuffering": true
+        },
+        {
           "path": "/",
           "upstream": "backend_servers",
+          "balancer": "round-robin",
           "proxyTimeout": 5000,
           "proxyBuffering": true
         }
       ]
     },
     {
-      "name": "toscueducn",
-      "listen": 9001,
+      "name": "load_balance_test",
+      "listen": 9002,
       "serverName": [
-        "toscueducn.com"
+        "loadtest.local"
       ],
       "locations": [
         {
           "path": "/",
-          "upstream": "backend_servers",
-          "proxyTimeout": 5000,
+          "upstream": "load_balance_test",
+          "balancer": "round-robin",
+          "rateLimit": {
+            "rate": 1000,
+            "burst": 500,
+            "nodelay": true
+          },
+          "proxyTimeout": 10000,
+          "proxyBuffering": true
+        }
+      ]
+    },
+    {
+      "name": "stress_test",
+      "listen": 9003,
+      "serverName": [
+        "stresstest.local"
+      ],
+      "locations": [
+        {
+          "path": "/",
+          "upstream": "stress_test",
+          "balancer": "round-robin",
+          "proxyTimeout": 30000,
           "proxyBuffering": true
         }
       ]
     }
   ],
   "logging": {
-    "level": "debug",
+    "level": "error",
     "file": "./logs/access.log"
   },
   "monitoring": {
@@ -79,5 +256,17 @@
       "memoryUsage",
       "serverMetrics"
     ]
+  },
+  "captcha": {
+    "enabled": true,
+    "maxAttempts": 5,
+    "timeout": 300000,
+    "blackholeThreshold": 10,
+    "banDuration": 900000,
+    "google": {
+      "siteKey": "",
+      "secretKey": "",
+      "minScore": 0.5
+    }
   }
 }

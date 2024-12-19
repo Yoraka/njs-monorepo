@@ -1,22 +1,30 @@
 import { BaseBalancer } from './balancer';
 import { UpstreamServer } from '../types';
+import { Logger } from 'winston';
+
+interface ServerWeight {
+  server: UpstreamServer;
+  currentWeight: number;
+  effectiveWeight: number;
+}
 
 /**
  * 轮询负载均衡器
  * 按照权重顺序循环选择可用的上游服务器
  */
 export class RoundRobinBalancer extends BaseBalancer {
-  private currentIndex: number;
-  private currentWeight: number;
-  private maxWeight: number = 0;
-  private gcd: number = 1; // 最大公约数，默认为1
-  private currentServer: UpstreamServer | null = null;  // 添加当前服务器的引用
+  private serverWeights: Map<string, ServerWeight> = new Map();
+  private currentServer: UpstreamServer | null = null;
+  private logger: Logger;
 
-  constructor(servers: UpstreamServer[]) {
+  constructor(servers: UpstreamServer[], logger: Logger) {
     super(servers);
-    this.currentIndex = -1;
-    this.currentWeight = 0;
+    this.logger = logger;
     this.initializeWeights();
+    this.logger.info('初始化负载均衡器', {
+      serversCount: servers.length,
+      servers: servers.map(s => s.url)
+    });
   }
 
   /**
@@ -36,21 +44,40 @@ export class RoundRobinBalancer extends BaseBalancer {
     // 获取可用的服务器列表
     const availableServers = this.getAvailableServers();
     
+    this.logger.info('获取可用服务器列表', {
+      availableCount: availableServers.length,
+      availableServers: availableServers.map(s => s.url),
+      totalServers: this.servers.length
+    });
+
     // 如果没有可用服务器，尝试使用备用服务器
     if (availableServers.length === 0) {
       this.currentServer = this.tryGetBackupServer();
+      this.logger.info('没有可用服务器，尝试使用备用服务器', {
+        backupServer: this.currentServer?.url
+      });
       return this.currentServer;
     }
 
     // 如果只有一个可用服务器，直接返回
     if (availableServers.length === 1) {
       this.currentServer = availableServers[0];
+      this.logger.info('只有一个可用服务器', {
+        server: this.currentServer.url
+      });
       return this.currentServer;
     }
 
     // 使用加权轮询算法选择服务器
     const server = this.getNextWeightedServer(availableServers);
     this.currentServer = server;
+    this.logger.info('选择下一个服务器', {
+      selectedServer: server.url,
+      weights: Array.from(this.serverWeights.values()).map(sw => ({
+        url: sw.server.url,
+        currentWeight: sw.currentWeight
+      }))
+    });
     return server;
   }
 
@@ -60,33 +87,22 @@ export class RoundRobinBalancer extends BaseBalancer {
    */
   public updateServers(servers: UpstreamServer[]): void {
     super.updateServers(servers);
-    this.currentIndex = -1;
-    this.currentWeight = 0;
-    this.currentServer = null;  // 重置当前服务器引用
+    this.currentServer = null;
     this.initializeWeights();
   }
 
   /**
    * 初始化权重相关的计算
-   * 计算最大权重和权重的最大公约数
    */
   private initializeWeights(): void {
-    this.maxWeight = 0;
-    let weights: number[] = [];
-
-    // 收集所有权重并找出最大权重
+    this.serverWeights.clear();
     this.servers.forEach(server => {
-      const weight = server.weight || 1;
-      weights.push(weight);
-      this.maxWeight = Math.max(this.maxWeight, weight);
+      this.serverWeights.set(server.url, {
+        server,
+        currentWeight: 0,
+        effectiveWeight: server.weight || 1
+      });
     });
-
-    // 计算所有权重的最大公约数
-    this.gcd = this.calculateGCD(weights);
-    
-    // 重置当前权重和索引
-    this.currentWeight = 0;
-    this.currentIndex = -1;
   }
 
   /**
@@ -96,51 +112,44 @@ export class RoundRobinBalancer extends BaseBalancer {
    * @returns 选中的服务器
    */
   private getNextWeightedServer(servers: UpstreamServer[]): UpstreamServer {
-    let server: UpstreamServer | null = null;
-    
-    // 实现平滑加权轮询算法
-    while (server === null) {
-      this.currentIndex = (this.currentIndex + 1) % servers.length;
-      
-      if (this.currentIndex === 0) {
-        this.currentWeight = this.currentWeight - this.gcd;
-        if (this.currentWeight <= 0) {
-          this.currentWeight = this.maxWeight;
-          if (this.currentWeight === 0) {
-            this.currentServer = servers[0];
-            return servers[0]; // 如果所有权重都是0，直接返回第一个服务器
-          }
-        }
-      }
-      
-      const currentServer = servers[this.currentIndex];
-      if ((currentServer.weight || 1) >= this.currentWeight) {
-        server = currentServer;
-        this.currentServer = server;  // 更新当前服务器引用
-      }
-    }
-    
-    return server;
-  }
+    // 更新当前权重
+    let totalWeight = 0;
+    servers.forEach(server => {
+      const weight = this.serverWeights.get(server.url)!;
+      weight.currentWeight += weight.effectiveWeight;
+      totalWeight += weight.effectiveWeight;
+    });
 
-  /**
-   * 计算最大公约数
-   * @param numbers 需要计算最大公约数的数字数组
-   * @returns 最大公约数
-   */
-  private calculateGCD(numbers: number[]): number {
-    if (numbers.length === 0) return 1;
-    
-    const gcd = (a: number, b: number): number => {
-      if (b === 0) return a;
-      return gcd(b, a % b);
-    };
+    this.logger.warn('更新服务器权重', {
+      weights: Array.from(this.serverWeights.values()).map(sw => ({
+        url: sw.server.url,
+        currentWeight: sw.currentWeight,
+        effectiveWeight: sw.effectiveWeight
+      }))
+    });
 
-    let result = numbers[0];
-    for (let i = 1; i < numbers.length; i++) {
-      result = gcd(result, numbers[i]);
-    }
-    
-    return result || 1;
+    // 找到当前权重最大的服务器
+    let maxWeightServer = this.serverWeights.get(servers[0].url)!;
+    servers.forEach(server => {
+      const weight = this.serverWeights.get(server.url)!;
+      if (weight.currentWeight > maxWeightServer.currentWeight) {
+        maxWeightServer = weight;
+      }
+    });
+
+    // 选中的服务器权重减去总权重
+    maxWeightServer.currentWeight -= totalWeight;
+
+    this.logger.warn('选择权重最大的服务器', {
+      selectedServer: maxWeightServer.server.url,
+      selectedWeight: maxWeightServer.currentWeight,
+      totalWeight,
+      weights: Array.from(this.serverWeights.values()).map(sw => ({
+        url: sw.server.url,
+        currentWeight: sw.currentWeight
+      }))
+    });
+
+    return maxWeightServer.server;
   }
 }
